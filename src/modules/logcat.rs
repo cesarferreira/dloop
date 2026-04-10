@@ -147,7 +147,7 @@ pub fn spawn_logcat_reader(
     tx: Sender<String>,
 ) -> Result<Child> {
     let mut child = Command::new(adb_path)
-        .args(["-s", device, "logcat", "-v", "time"])
+        .args(["-s", device, "logcat", "-v", "threadtime"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

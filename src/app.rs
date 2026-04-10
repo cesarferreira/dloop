@@ -537,12 +537,23 @@ impl App {
         let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
             return;
         };
-        // Use the first known package; fall back to noop.
-        let package = match self.effective_packages.first() {
-            Some(p) => p.clone(),
-            None => {
-                self.show_toast("No package known — can't launch");
-                return;
+
+        // Priority 1 — user explicitly chose a package via the picker.
+        // Priority 2 — read the applicationId that Gradle wrote into output-metadata.json
+        //              (this is exactly what Android Studio does; it always matches the
+        //              installed variant rather than the base/prod package ID).
+        // Priority 3 — fall back to the first inferred package.
+        let package = if let Some(ref pkg) = self.active_package_filter {
+            pkg.clone()
+        } else if let Some(pkg) = self.read_built_package_id() {
+            pkg
+        } else {
+            match self.effective_packages.first() {
+                Some(p) => p.clone(),
+                None => {
+                    self.show_toast("No package known — can't launch");
+                    return;
+                }
             }
         };
         // `monkey -p <pkg> -c android.intent.category.LAUNCHER 1` reliably starts the app.
@@ -567,6 +578,19 @@ impl App {
             }
             Err(e) => self.show_toast(format!("Launch error: {e}")),
         }
+    }
+
+    /// Walk `app/build/outputs/apk/` for the most recently written `output-metadata.json`
+    /// and extract the `applicationId` field.  This mirrors how Android Studio determines
+    /// which package ID was produced by the last Gradle build.
+    fn read_built_package_id(&self) -> Option<String> {
+        let apk_dir = self.project_root.join("app/build/outputs/apk");
+        if !apk_dir.exists() {
+            return None;
+        }
+        let mut best: Option<(std::time::SystemTime, String)> = None;
+        collect_apk_metadata(&apk_dir, &mut best);
+        best.map(|(_, pkg)| pkg)
     }
 
     fn handle_action(&mut self, action: Action) -> Result<bool> {
@@ -857,4 +881,49 @@ pub fn run_app(
     app.stop_build();
     restore_terminal()?;
     Ok(())
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Recursively scan `dir` for `output-metadata.json` files and collect
+/// (modified_time, applicationId) pairs.  Updates `best` with the most recent.
+fn collect_apk_metadata(dir: &std::path::Path, best: &mut Option<(std::time::SystemTime, String)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_apk_metadata(&path, best);
+        } else if path.file_name().and_then(|n| n.to_str()) == Some("output-metadata.json") {
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(meta) = path.metadata() else { continue };
+            let Ok(modified) = meta.modified() else { continue };
+
+            // Extract `"applicationId": "com.example.app"` with a simple scan —
+            // avoids pulling in serde_json as a direct dependency.
+            if let Some(pkg) = extract_application_id_from_metadata(&content) {
+                let is_newer = best.as_ref().map_or(true, |(t, _)| modified > *t);
+                if is_newer {
+                    *best = Some((modified, pkg));
+                }
+            }
+        }
+    }
+}
+
+fn extract_application_id_from_metadata(json: &str) -> Option<String> {
+    // The file is small and well-structured; a linear scan is fine.
+    let key = "\"applicationId\"";
+    let start = json.find(key)?;
+    let after_key = &json[start + key.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    if after_colon.starts_with('"') {
+        let inner = &after_colon[1..];
+        let end = inner.find('"')?;
+        let pkg = inner[..end].trim().to_string();
+        if !pkg.is_empty() {
+            return Some(pkg);
+        }
+    }
+    None
 }

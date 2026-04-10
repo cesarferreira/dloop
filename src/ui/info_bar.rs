@@ -1,5 +1,5 @@
-//! Single-line top info bar: device · variant · build status · log count · package filter
-use ratatui::layout::Rect;
+//! Three-row top info bar: device · build · logcat · package · hints
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -7,69 +7,121 @@ use ratatui::Frame;
 
 use crate::app::App;
 
+const BG: Color = Color::Rgb(14, 14, 22);
+const BG2: Color = Color::Rgb(18, 18, 28);
+const SEP_COL: Color = Color::Rgb(45, 45, 62);
+const DIM: Color = Color::Rgb(80, 80, 100);
+
 pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
-    let dim = Style::default().fg(Color::Rgb(90, 90, 110));
-    let sep = "│";
-    let sep_style = Style::default().fg(Color::Rgb(50, 50, 65));
+    // Split the 3 rows.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
 
-    let mut parts: Vec<String> = Vec::new();
-    let mut styles: Vec<Style> = Vec::new();
+    f.render_widget(row1(app), rows[0]);
+    f.render_widget(row2(app), rows[1]);
+    f.render_widget(row3(app), rows[2]);
+}
 
-    macro_rules! push {
-        ($text:expr, $style:expr) => {
-            parts.push($text.to_string());
-            styles.push($style);
-        };
-    }
-    macro_rules! sep {
-        () => {
-            push!(sep, sep_style);
-        };
-    }
+// ── Row 1: Device + Build variant + Build status ──────────────────────────────
+fn row1(app: &App) -> Paragraph<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
 
-    // ── device ────────────────────────────────────────────────────────────
+    // Leading space
+    spans.push(Span::raw("  "));
+
+    // ── device ────────────────────────────────────────────────────────────────
     if app.devices.is_empty() {
-        push!(" no device  d to pick ", Style::default().fg(Color::Yellow));
+        spans.push(Span::styled(
+            "⚠ no device connected",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
         let d = &app.devices[app.selected_device];
-        let serial_short: String = d.serial.chars().take(8).collect();
-        push!(
-            format!("  {}  [{}…] ", d.model, serial_short),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        );
+        spans.push(Span::styled(
+            "󰟜 ",
+            Style::default().fg(Color::Rgb(100, 220, 255)),
+        ));
+        spans.push(Span::styled(
+            d.model.clone(),
+            Style::default()
+                .fg(Color::Rgb(180, 230, 255))
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("  [{}]", truncate(&d.serial, 10)),
+            Style::default().fg(Color::Rgb(70, 90, 110)),
+        ));
     }
-    sep!();
 
-    // ── variant ───────────────────────────────────────────────────────────
+    spans.push(sep());
+
+    // ── variant ───────────────────────────────────────────────────────────────
     let variant = short_task(&app.effective_assemble).to_string();
-    push!(
-        format!(" {variant} "),
-        Style::default().fg(Color::Rgb(180, 190, 254))
-    );
-    sep!();
+    spans.push(Span::styled(
+        " variant  ",
+        Style::default().fg(DIM),
+    ));
+    spans.push(Span::styled(
+        variant,
+        Style::default()
+            .fg(Color::Rgb(180, 160, 255))
+            .add_modifier(Modifier::BOLD),
+    ));
 
-    // ── build status ──────────────────────────────────────────────────────
+    spans.push(sep());
+
+    // ── build status ──────────────────────────────────────────────────────────
+    spans.push(Span::raw("  "));
     if let Some(ref task) = app.build_task {
-        push!(
-            format!(" ▶ {} ", short_task(task)),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-        );
+        spans.push(Span::styled(
+            "▶ ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("building {}…", short_task(task)),
+            Style::default().fg(Color::Yellow),
+        ));
     } else if let Some(last) = app.build_history.last() {
-        let (icon, col) = if last.exit_code == Some(0) {
-            ("✓", Color::Green)
+        let (icon, col, label) = if last.exit_code == Some(0) {
+            ("✓", Color::Rgb(130, 230, 130), "build ok")
         } else {
-            ("✗", Color::Red)
+            ("✗", Color::Rgb(230, 90, 90), "build failed")
         };
-        push!(
-            format!(" {icon} {:.1}s ", last.duration.as_secs_f64()),
-            Style::default().fg(col)
-        );
+        spans.push(Span::styled(
+            format!("{icon} "),
+            Style::default().fg(col).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("{label}  ({:.1}s)", last.duration.as_secs_f64()),
+            Style::default().fg(Color::Rgb(120, 120, 145)),
+        ));
     } else {
-        push!(" idle ", dim);
+        spans.push(Span::styled(
+            "no build yet",
+            Style::default().fg(DIM),
+        ));
     }
-    sep!();
 
-    // ── logcat ────────────────────────────────────────────────────────────
+    Paragraph::new(Line::from(spans)).style(Style::default().bg(BG))
+}
+
+// ── Row 2: Logcat status + package filter ────────────────────────────────────
+fn row2(app: &App) -> Paragraph<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    spans.push(Span::raw("  "));
+
+    // ── logcat ────────────────────────────────────────────────────────────────
     if app.logcat_running {
         let count = app.log_lines.len();
         let c = if count >= 1_000 {
@@ -77,37 +129,124 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
         } else {
             count.to_string()
         };
-        push!(
-            format!(" ● {c} lines "),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-        );
-    } else {
-        push!(" ○ off ", dim);
-    }
-    sep!();
+        spans.push(Span::styled(
+            "● ",
+            Style::default()
+                .fg(Color::Rgb(100, 230, 100))
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("logcat  {c} lines"),
+            Style::default().fg(Color::Rgb(140, 220, 140)),
+        ));
 
-    // ── package filter ────────────────────────────────────────────────────
+        // scroll offset indicator
+        if app.log_scroll > 0 {
+            spans.push(Span::styled(
+                format!("  ↑ +{}", app.log_scroll),
+                Style::default().fg(DIM),
+            ));
+        }
+    } else {
+        spans.push(Span::styled(
+            "○ logcat off",
+            Style::default().fg(DIM),
+        ));
+    }
+
+    spans.push(sep());
+
+    // ── package filter ────────────────────────────────────────────────────────
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        "pkg  ",
+        Style::default().fg(DIM),
+    ));
     if app.show_all_logs {
-        push!(" all logs ", dim);
+        spans.push(Span::styled(
+            "all processes",
+            Style::default().fg(DIM),
+        ));
     } else {
         let pkg = app
             .active_package_filter
             .clone()
             .or_else(|| app.effective_packages.first().cloned())
             .unwrap_or_else(|| "?".to_string());
-        push!(format!(" {pkg} "), Style::default().fg(Color::Cyan));
+        spans.push(Span::styled(
+            pkg,
+            Style::default()
+                .fg(Color::Rgb(100, 200, 230))
+                .add_modifier(Modifier::BOLD),
+        ));
     }
 
-    let spans: Vec<Span<'static>> = parts
-        .into_iter()
-        .zip(styles)
-        .map(|(t, s)| Span::styled(t, s))
-        .collect();
+    // ── device count ─────────────────────────────────────────────────────────
+    if app.devices.len() > 1 {
+        spans.push(sep());
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("{} devices", app.devices.len()),
+            Style::default().fg(DIM),
+        ));
+    }
 
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Rgb(20, 20, 30))),
-        area,
-    );
+    Paragraph::new(Line::from(spans)).style(Style::default().bg(BG2))
+}
+
+// ── Row 3: project path / toast ───────────────────────────────────────────────
+fn row3(app: &App) -> Paragraph<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    spans.push(Span::raw("  "));
+
+    if let Some((ref msg, _)) = app.toast {
+        // Toast takes priority
+        spans.push(Span::styled(
+            msg.clone(),
+            Style::default()
+                .fg(Color::Rgb(255, 220, 100))
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        // Show project root path, dimmed
+        let path = app
+            .project_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_string();
+        spans.push(Span::styled(
+            format!("project  {path}"),
+            Style::default().fg(Color::Rgb(50, 50, 70)),
+        ));
+
+        // If logcat filter is active, hint
+        if app.filter_focused {
+            spans.push(sep());
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!("filter: {}", app.filter_input),
+                Style::default().fg(Color::Rgb(255, 200, 100)),
+            ));
+        }
+    }
+
+    Paragraph::new(Line::from(spans)).style(
+        Style::default()
+            .bg(BG)
+            .fg(Color::Rgb(50, 50, 70))
+            .add_modifier(Modifier::DIM),
+    )
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+fn sep() -> Span<'static> {
+    Span::styled(
+        "  │  ",
+        Style::default().fg(SEP_COL),
+    )
 }
 
 fn short_task(task: &str) -> &str {
@@ -117,5 +256,13 @@ fn short_task(task: &str) -> &str {
         rest
     } else {
         task
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max])
     }
 }

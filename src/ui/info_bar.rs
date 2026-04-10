@@ -1,4 +1,4 @@
-//! Three-row top info bar: device · build · logcat · package · hints
+//! Three-row top info bar: device · build · logcat · package · activity
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,9 +11,11 @@ const BG: Color = Color::Rgb(14, 14, 22);
 const BG2: Color = Color::Rgb(18, 18, 28);
 const SEP_COL: Color = Color::Rgb(45, 45, 62);
 const DIM: Color = Color::Rgb(80, 80, 100);
+const MUTED: Color = Color::Rgb(100, 105, 130);
+
+const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
-    // Split the 3 rows.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -32,10 +34,8 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
 fn row1(app: &App) -> Paragraph<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    // Leading space
     spans.push(Span::raw("  "));
 
-    // ── device ────────────────────────────────────────────────────────────────
     if app.devices.is_empty() {
         spans.push(Span::styled(
             "⚠ no device connected",
@@ -63,12 +63,8 @@ fn row1(app: &App) -> Paragraph<'static> {
 
     spans.push(sep());
 
-    // ── variant ───────────────────────────────────────────────────────────────
     let variant = short_task(&app.effective_assemble).to_string();
-    spans.push(Span::styled(
-        " variant  ",
-        Style::default().fg(DIM),
-    ));
+    spans.push(Span::styled(" variant  ", Style::default().fg(DIM)));
     spans.push(Span::styled(
         variant,
         Style::default()
@@ -78,18 +74,15 @@ fn row1(app: &App) -> Paragraph<'static> {
 
     spans.push(sep());
 
-    // ── build status ──────────────────────────────────────────────────────────
+    // Build result (compact — the big in-progress banner lives on row 3)
     spans.push(Span::raw("  "));
-    if let Some(ref task) = app.build_task {
+    if app.build_task.is_some() {
+        // Just a brief marker; row 3 has the full banner
         spans.push(Span::styled(
-            "▶ ",
+            "⟳ building…",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(
-            format!("building {}…", short_task(task)),
-            Style::default().fg(Color::Yellow),
         ));
     } else if let Some(last) = app.build_history.last() {
         let (icon, col, label) = if last.exit_code == Some(0) {
@@ -103,13 +96,10 @@ fn row1(app: &App) -> Paragraph<'static> {
         ));
         spans.push(Span::styled(
             format!("{label}  ({:.1}s)", last.duration.as_secs_f64()),
-            Style::default().fg(Color::Rgb(120, 120, 145)),
+            Style::default().fg(MUTED),
         ));
     } else {
-        spans.push(Span::styled(
-            "no build yet",
-            Style::default().fg(DIM),
-        ));
+        spans.push(Span::styled("no build yet", Style::default().fg(DIM)));
     }
 
     Paragraph::new(Line::from(spans)).style(Style::default().bg(BG))
@@ -121,7 +111,6 @@ fn row2(app: &App) -> Paragraph<'static> {
 
     spans.push(Span::raw("  "));
 
-    // ── logcat ────────────────────────────────────────────────────────────────
     if app.logcat_running {
         let count = app.log_lines.len();
         let c = if count >= 1_000 {
@@ -140,7 +129,6 @@ fn row2(app: &App) -> Paragraph<'static> {
             Style::default().fg(Color::Rgb(140, 220, 140)),
         ));
 
-        // scroll offset indicator
         if app.log_scroll > 0 {
             spans.push(Span::styled(
                 format!("  ↑ +{}", app.log_scroll),
@@ -148,25 +136,15 @@ fn row2(app: &App) -> Paragraph<'static> {
             ));
         }
     } else {
-        spans.push(Span::styled(
-            "○ logcat off",
-            Style::default().fg(DIM),
-        ));
+        spans.push(Span::styled("○ logcat off", Style::default().fg(DIM)));
     }
 
     spans.push(sep());
 
-    // ── package filter ────────────────────────────────────────────────────────
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        "pkg  ",
-        Style::default().fg(DIM),
-    ));
+    spans.push(Span::styled("pkg  ", Style::default().fg(DIM)));
     if app.show_all_logs {
-        spans.push(Span::styled(
-            "all processes",
-            Style::default().fg(DIM),
-        ));
+        spans.push(Span::styled("all processes", Style::default().fg(DIM)));
     } else {
         let pkg = app
             .active_package_filter
@@ -181,7 +159,6 @@ fn row2(app: &App) -> Paragraph<'static> {
         ));
     }
 
-    // ── device count ─────────────────────────────────────────────────────────
     if app.devices.len() > 1 {
         spans.push(sep());
         spans.push(Span::raw("  "));
@@ -194,59 +171,97 @@ fn row2(app: &App) -> Paragraph<'static> {
     Paragraph::new(Line::from(spans)).style(Style::default().bg(BG2))
 }
 
-// ── Row 3: project path / toast ───────────────────────────────────────────────
+// ── Row 3: Activity banner / project / toast ──────────────────────────────────
 fn row3(app: &App) -> Paragraph<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
-
     spans.push(Span::raw("  "));
 
+    // Priority 1: toast messages (launch result, errors, etc.)
     if let Some((ref msg, _)) = app.toast {
-        // Toast takes priority
         spans.push(Span::styled(
             msg.clone(),
             Style::default()
                 .fg(Color::Rgb(255, 220, 100))
                 .add_modifier(Modifier::BOLD),
         ));
-    } else {
-        // Show project root path, dimmed
-        let path = app
-            .project_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
-        spans.push(Span::styled(
-            format!("project  {path}"),
-            Style::default().fg(Color::Rgb(50, 50, 70)),
-        ));
-
-        // If logcat filter is active, hint
-        if app.filter_focused {
-            spans.push(sep());
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                format!("filter: {}", app.filter_input),
-                Style::default().fg(Color::Rgb(255, 200, 100)),
-            ));
-        }
+        return Paragraph::new(Line::from(spans)).style(Style::default().bg(BG));
     }
 
-    Paragraph::new(Line::from(spans)).style(
-        Style::default()
-            .bg(BG)
-            .fg(Color::Rgb(50, 50, 70))
-            .add_modifier(Modifier::DIM),
-    )
+    // Priority 2: build/install in progress — prominent animated banner
+    if let Some(ref task) = app.build_task {
+        let elapsed = app
+            .build_start
+            .map(|s| s.elapsed().as_secs())
+            .unwrap_or(0);
+        let frame = (elapsed as usize) % SPINNER.len();
+        let spin = SPINNER[frame];
+
+        let action_label = if task.starts_with("install") {
+            "INSTALLING"
+        } else {
+            "BUILDING"
+        };
+        let label_with_launch = if app.launch_after_build {
+            format!("{action_label} + LAUNCHING")
+        } else {
+            action_label.to_string()
+        };
+
+        spans.push(Span::styled(
+            format!(" {spin} "),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {label_with_launch} "),
+            Style::default()
+                .fg(Color::Rgb(255, 220, 80))
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {} ", short_task(task)),
+            Style::default().fg(Color::Rgb(200, 190, 140)),
+        ));
+        spans.push(Span::styled(
+            format!(" {elapsed}s"),
+            Style::default().fg(DIM),
+        ));
+
+        return Paragraph::new(Line::from(spans))
+            .style(Style::default().bg(Color::Rgb(30, 28, 10)));
+    }
+
+    // Priority 3: project path + filter hint
+    let path = app
+        .project_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("?")
+        .to_string();
+    spans.push(Span::styled("project  ", Style::default().fg(DIM)));
+    spans.push(Span::styled(
+        path,
+        Style::default().fg(MUTED),
+    ));
+
+    if app.filter_focused {
+        spans.push(sep());
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("filter: {}", app.filter_input),
+            Style::default().fg(Color::Rgb(255, 200, 100)),
+        ));
+    }
+
+    Paragraph::new(Line::from(spans)).style(Style::default().bg(BG))
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn sep() -> Span<'static> {
-    Span::styled(
-        "  │  ",
-        Style::default().fg(SEP_COL),
-    )
+    Span::styled("  │  ", Style::default().fg(SEP_COL))
 }
 
 fn short_task(task: &str) -> &str {

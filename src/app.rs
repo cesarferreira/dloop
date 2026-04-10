@@ -12,11 +12,11 @@ use ratatui::Terminal;
 
 use crate::action::Action;
 use crate::adb::{AdbClient, Device};
-use crate::event::{poll_event, AppEvent};
-use crate::modules::build::{find_gradlew, spawn_gradle};
+use crate::event::{poll_event, AppEvent, Modal};
 use crate::modules::config::save_global_config;
 use crate::modules::config::MergedConfig;
 use crate::modules::device::scan_devices;
+use crate::modules::build::{find_gradlew, spawn_gradle};
 use crate::modules::logcat::{
     clear_buffer, parse_log_line, refresh_pids_for_packages, spawn_logcat_reader, LogEntry,
     LogcatFilter,
@@ -112,8 +112,6 @@ use crate::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
-    Devices,
-    Build,
     Logs,
 }
 
@@ -133,7 +131,21 @@ pub struct App {
 
     pub devices: Vec<Device>,
     pub selected_device: usize,
+    #[allow(dead_code)]
     pub active_pane: Pane,
+
+    // ── popup/overlay state ───────────────────────────────────────────────
+    pub device_picker_open: bool,
+    pub device_picker_cursor: usize,
+
+    pub build_popup_open: bool,
+    pub build_popup_scroll: usize,
+
+    pub package_picker_open: bool,
+    pub package_picker_input: String,
+    pub package_picker_cursor: usize,
+    /// `None` = show all; `Some(pkg)` = filter to this package only
+    pub active_package_filter: Option<String>,
 
     pub logcat_child: Option<Child>,
     pub logcat_running: bool,
@@ -150,7 +162,7 @@ pub struct App {
     pub build_start: Option<Instant>,
     pub build_lines: Vec<String>,
     pub build_history: Vec<BuildRecord>,
-    /// Whether the build pane is expanded to show full output.
+    #[allow(dead_code)]
     pub build_expanded: bool,
 
     pub toast: Option<(String, Instant)>,
@@ -185,6 +197,40 @@ pub struct App {
 }
 
 impl App {
+    /// Which modal is currently active (for event routing).
+    pub fn active_modal(&self) -> Modal {
+        if self.filter_focused { return Modal::Filter; }
+        if self.picker_open { return Modal::VariantPicker; }
+        if self.device_picker_open { return Modal::DevicePicker; }
+        if self.build_popup_open { return Modal::BuildPopup; }
+        if self.package_picker_open { return Modal::PackagePicker; }
+        Modal::None
+    }
+
+    /// Filtered package list used for the package picker display.
+    pub fn filtered_package_list(&self) -> Vec<String> {
+        let all = self.all_known_packages();
+        if self.package_picker_input.is_empty() {
+            return all;
+        }
+        let q = self.package_picker_input.to_lowercase();
+        all.into_iter()
+            .filter(|p| p.to_lowercase().contains(&q))
+            .collect()
+    }
+
+    pub fn all_known_packages(&self) -> Vec<String> {
+        let mut pkgs: Vec<String> = self.effective_packages.clone();
+        for p in &self.inference.application_ids {
+            if !pkgs.contains(p) {
+                pkgs.push(p.clone());
+            }
+        }
+        pkgs
+    }
+}
+
+impl App {
     pub fn new(project_root: PathBuf, config: MergedConfig) -> Result<Self> {
         let adb = AdbClient::new()?;
         let inference = infer_project(&project_root).unwrap_or_else(|_| ProjectInference {
@@ -215,7 +261,15 @@ impl App {
             config,
             devices: Vec::new(),
             selected_device: 0,
-            active_pane: Pane::Devices,
+            active_pane: Pane::Logs,
+            device_picker_open: false,
+            device_picker_cursor: 0,
+            build_popup_open: false,
+            build_popup_scroll: 0,
+            package_picker_open: false,
+            package_picker_input: String::new(),
+            package_picker_cursor: 0,
+            active_package_filter: None,
             logcat_child: None,
             logcat_running: false,
             logcat_paused: false,
@@ -350,14 +404,24 @@ impl App {
         } else {
             None
         };
-        // Only filter by package PID when the user explicitly opted in AND packages are known.
-        let filter_by_pkg = !self.show_all_logs && !self.effective_packages.is_empty();
+        // show_all_logs=true → no PID filter; active_package_filter overrides effective_packages.
+        let filter_by_pkg = !self.show_all_logs
+            && (self.active_package_filter.is_some() || !self.effective_packages.is_empty());
         LogcatFilter {
             filter_by_application_ids: filter_by_pkg,
             tag_substrings: self.config.project.log_filters.clone(),
             levels: level,
             content,
             exclude: None,
+        }
+    }
+
+    /// The package(s) currently used for PID filtering.
+    pub fn filter_packages(&self) -> Vec<String> {
+        if let Some(ref p) = self.active_package_filter {
+            vec![p.clone()]
+        } else {
+            self.effective_packages.clone()
         }
     }
 
@@ -375,13 +439,10 @@ impl App {
             return Ok(());
         };
         self.stop_logcat();
-        if !self.effective_packages.is_empty() {
-            self.package_pids = refresh_pids_for_packages(
-                &self.adb,
-                serial.as_str(),
-                &self.effective_packages,
-            )
-            .unwrap_or_default();
+        let pkgs = self.filter_packages();
+        if !pkgs.is_empty() {
+            self.package_pids =
+                refresh_pids_for_packages(&self.adb, serial.as_str(), &pkgs).unwrap_or_default();
         }
         let child = spawn_logcat_reader(&self.adb.adb_path, serial.as_str(), self.tx_log.clone())?;
         self.logcat_child = Some(child);
@@ -509,71 +570,16 @@ impl App {
     }
 
     fn handle_action(&mut self, action: Action) -> Result<bool> {
-        if self.filter_focused {
-            match action {
-                Action::Quit => return Ok(true),
-                Action::FocusFilter => {
-                    self.filter_focused = false;
-                }
-                Action::ConfirmNo => {
-                    self.filter_focused = false;
-                }
-                _ => {}
-            }
-            if matches!(
-                action,
-                Action::Quit | Action::FocusFilter | Action::ConfirmNo
-            ) {
-                return Ok(matches!(action, Action::Quit));
-            }
-        }
-
         match action {
             Action::Quit => return Ok(true),
             Action::RefreshDevices => {
                 if let Err(e) = self.refresh_devices() {
                     self.show_toast(format!("devices: {e}"));
                 } else {
-                    let prev = self.selected_serial().map(|s| s.to_string());
-                    if let Some(s) = prev {
-                        if let Some(i) = self.devices.iter().position(|d| d.serial == s) {
-                            self.selected_device = i;
-                        }
-                    }
                     if self.logcat_running {
                         self.stop_logcat();
                         let _ = self.start_logcat();
                     }
-                }
-            }
-            Action::NextPane => {
-                self.active_pane = match self.active_pane {
-                    Pane::Devices => Pane::Build,
-                    Pane::Build => Pane::Logs,
-                    Pane::Logs => Pane::Devices,
-                };
-            }
-            Action::PrevPane => {
-                self.active_pane = match self.active_pane {
-                    Pane::Devices => Pane::Logs,
-                    Pane::Build => Pane::Devices,
-                    Pane::Logs => Pane::Build,
-                };
-            }
-            Action::NextDevice => {
-                if !self.devices.is_empty() {
-                    self.selected_device = (self.selected_device + 1) % self.devices.len();
-                    self.persist_preferred_device();
-                }
-            }
-            Action::PrevDevice => {
-                if !self.devices.is_empty() {
-                    self.selected_device = if self.selected_device == 0 {
-                        self.devices.len() - 1
-                    } else {
-                        self.selected_device - 1
-                    };
-                    self.persist_preferred_device();
                 }
             }
             Action::ToggleLogcat => {
@@ -585,9 +591,14 @@ impl App {
             }
             Action::FocusFilter => {
                 self.filter_focused = !self.filter_focused;
-                if self.filter_focused {
-                    self.active_pane = Pane::Logs;
-                }
+            }
+            Action::ConfirmNo => {
+                self.filter_focused = false;
+                self.picker_open = false;
+                self.device_picker_open = false;
+                self.build_popup_open = false;
+                self.package_picker_open = false;
+                self.package_picker_input.clear();
             }
             Action::ClearLogs => self.clear_logs(),
             Action::ToggleLogcatPause => {
@@ -599,10 +610,18 @@ impl App {
                 self.show_toast(format!("Logcat: {mode}"));
             }
             Action::ScrollUp => {
-                self.log_scroll = self.log_scroll.saturating_add(1);
+                if self.build_popup_open {
+                    self.build_popup_scroll = self.build_popup_scroll.saturating_add(1);
+                } else {
+                    self.log_scroll = self.log_scroll.saturating_add(1);
+                }
             }
             Action::ScrollDown => {
-                self.log_scroll = self.log_scroll.saturating_sub(1);
+                if self.build_popup_open {
+                    self.build_popup_scroll = self.build_popup_scroll.saturating_sub(1);
+                } else {
+                    self.log_scroll = self.log_scroll.saturating_sub(1);
+                }
             }
             Action::ScrollPageUp => {
                 self.log_scroll = self.log_scroll.saturating_add(20);
@@ -614,21 +633,60 @@ impl App {
                 self.log_scroll = 0;
             }
             Action::ToggleBuildExpand => {
-                self.build_expanded = !self.build_expanded;
+                self.build_popup_open = !self.build_popup_open;
+                self.build_popup_scroll = 0;
             }
+            // ── popup opens ───────────────────────────────────────────────
             Action::OpenVariantPicker => {
                 if !self.picker_variants.is_empty() {
                     self.picker_open = true;
                     self.picker_cursor = 0;
                 }
             }
+            Action::OpenDevicePicker => {
+                self.device_picker_open = true;
+                self.device_picker_cursor = self.selected_device;
+            }
+            Action::OpenBuildPopup => {
+                self.build_popup_open = !self.build_popup_open;
+                self.build_popup_scroll = 0;
+            }
+            Action::OpenPackagePicker => {
+                self.package_picker_open = true;
+                self.package_picker_input.clear();
+                self.package_picker_cursor = 0;
+            }
+            // ── shared picker navigation ──────────────────────────────────
             Action::PickerNext => {
-                if !self.picker_variants.is_empty() {
+                if self.device_picker_open {
+                    if !self.devices.is_empty() {
+                        self.device_picker_cursor =
+                            (self.device_picker_cursor + 1) % self.devices.len();
+                    }
+                } else if self.package_picker_open {
+                    let n = self.filtered_package_list().len() + 1; // +1 for "All"
+                    self.package_picker_cursor = (self.package_picker_cursor + 1) % n.max(1);
+                } else if self.picker_open && !self.picker_variants.is_empty() {
                     self.picker_cursor = (self.picker_cursor + 1) % self.picker_variants.len();
                 }
             }
             Action::PickerPrev => {
-                if !self.picker_variants.is_empty() {
+                if self.device_picker_open {
+                    if !self.devices.is_empty() {
+                        self.device_picker_cursor = if self.device_picker_cursor == 0 {
+                            self.devices.len() - 1
+                        } else {
+                            self.device_picker_cursor - 1
+                        };
+                    }
+                } else if self.package_picker_open {
+                    let n = self.filtered_package_list().len() + 1;
+                    self.package_picker_cursor = if self.package_picker_cursor == 0 {
+                        n.saturating_sub(1)
+                    } else {
+                        self.package_picker_cursor - 1
+                    };
+                } else if self.picker_open && !self.picker_variants.is_empty() {
                     self.picker_cursor = if self.picker_cursor == 0 {
                         self.picker_variants.len() - 1
                     } else {
@@ -637,15 +695,56 @@ impl App {
                 }
             }
             Action::PickerConfirm => {
-                if let Some((label, a, i)) = self.picker_variants.get(self.picker_cursor).cloned() {
-                    self.effective_assemble = a;
-                    self.effective_install = i;
-                    self.show_toast(format!("Variant: {label}"));
+                if self.device_picker_open {
+                    self.selected_device = self.device_picker_cursor;
+                    self.persist_preferred_device();
+                    if self.logcat_running {
+                        self.stop_logcat();
+                        let _ = self.start_logcat();
+                    }
+                    self.device_picker_open = false;
+                } else if self.package_picker_open {
+                    let filtered = self.filtered_package_list();
+                    if self.package_picker_cursor == 0 {
+                        // "All packages"
+                        self.active_package_filter = None;
+                        self.show_all_logs = true;
+                    } else {
+                        let idx = self.package_picker_cursor - 1;
+                        if let Some(pkg) = filtered.get(idx).cloned() {
+                            // If user typed something not in list, use the typed text
+                            let chosen = if filtered.is_empty() && !self.package_picker_input.is_empty() {
+                                self.package_picker_input.clone()
+                            } else {
+                                pkg
+                            };
+                            self.active_package_filter = Some(chosen.clone());
+                            self.show_all_logs = false;
+                            self.show_toast(format!("Filtering: {chosen}"));
+                        }
+                    }
+                    self.package_picker_open = false;
+                    self.package_picker_input.clear();
+                    // Restart logcat with new filter
+                    if self.logcat_running {
+                        self.stop_logcat();
+                        let _ = self.start_logcat();
+                    }
+                } else if self.picker_open {
+                    if let Some((label, a, i)) = self.picker_variants.get(self.picker_cursor).cloned() {
+                        self.effective_assemble = a;
+                        self.effective_install = i;
+                        self.show_toast(format!("Variant: {label}"));
+                    }
+                    self.picker_open = false;
                 }
-                self.picker_open = false;
             }
             Action::PickerCancel => {
                 self.picker_open = false;
+                self.device_picker_open = false;
+                self.build_popup_open = false;
+                self.package_picker_open = false;
+                self.package_picker_input.clear();
             }
             Action::BuildDebug => {
                 self.launch_after_build = false;
@@ -686,7 +785,7 @@ impl App {
                     self.show_toast("Launched scrcpy");
                 }
             }
-            Action::ConfirmYes | Action::ConfirmNo => {}
+            Action::ConfirmYes => {}
         }
         Ok(false)
     }
@@ -706,9 +805,10 @@ impl App {
         let Some(serial) = self.selected_serial() else {
             return;
         };
-        if !self.effective_packages.is_empty() {
-            self.package_pids = refresh_pids_for_packages(&self.adb, serial, &self.effective_packages)
-                .unwrap_or_default();
+        let pkgs = self.filter_packages();
+        if !pkgs.is_empty() {
+            self.package_pids =
+                refresh_pids_for_packages(&self.adb, serial, &pkgs).unwrap_or_default();
         }
     }
 }
@@ -731,13 +831,23 @@ pub fn run_app(
 
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
-        if let Some(ev) = poll_event(tick, app.filter_focused, app.active_pane, app.picker_open)? {
+        if let Some(ev) = poll_event(tick, app.active_modal())? {
             match ev {
                 AppEvent::Text(ch) => {
-                    app.filter_input.push(ch);
+                    if app.package_picker_open {
+                        app.package_picker_input.push(ch);
+                        app.package_picker_cursor = 0;
+                    } else {
+                        app.filter_input.push(ch);
+                    }
                 }
                 AppEvent::Backspace => {
-                    app.filter_input.pop();
+                    if app.package_picker_open {
+                        app.package_picker_input.pop();
+                        app.package_picker_cursor = 0;
+                    } else {
+                        app.filter_input.pop();
+                    }
                 }
                 AppEvent::Action(a) => {
                     if app.handle_action(a)? {

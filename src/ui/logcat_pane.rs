@@ -1,9 +1,7 @@
-//! Full-width logcat pane — rustycat-style rendering with word-wrap.
+//! Full-screen logcat pane — rustycat-style rendering with word-wrap.
 //!
-//! Column layout (matches rustycat):
-//!   [timestamp 12] [TAG right-aligned 23] [LEVEL 3] [message wraps to edge]
-//!
-//! Tags are only shown when they change; repeated runs of the same tag show blanks.
+//! Column layout:  [timestamp 12] [TAG right-aligned 23] [LEVEL 3] [message wraps]
+//! Tags are suppressed on repeated runs (rustycat style).
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -14,101 +12,80 @@ use crate::app::App;
 use crate::modules::logcat::{level_style, looks_like_stack_trace, tag_color};
 
 const TAG_WIDTH: usize = 23;
-const TS_WIDTH: usize = 12; // "HH:MM:SS.mmm"
-// prefix = TS_WIDTH + 1 + TAG_WIDTH + 1 + 3 (level) + 1 = 41
+const TS_WIDTH: usize = 12;
+// prefix = TS_WIDTH + 1(space) + TAG_WIDTH + 1(space) + 3(level) + 1(space) = 41
 const PREFIX_WIDTH: usize = TS_WIDTH + 1 + TAG_WIDTH + 1 + 3 + 1;
 
-pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect, border: Style) {
-    let running = app.logcat_running;
+pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     let paused = app.logcat_paused;
+    let running = app.logcat_running;
     let scrolled = app.log_scroll > 0;
 
     let title = if app.filter_focused {
-        " Logcat  [FILTER] ".to_string()
+        " Logcat  [FILTER] "
+    } else if paused {
+        " Logcat  PAUSED "
     } else if scrolled {
-        format!(" Logcat  ↑{} ", app.log_scroll)
+        " Logcat  ↑scrolled — End to tail "
     } else {
-        " Logcat ".to_string()
+        " Logcat "
     };
+
+    let border_style = Style::default().fg(if app.filter_focused {
+        Color::Cyan
+    } else {
+        Color::Rgb(50, 50, 70)
+    });
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(border);
+        .border_style(border_style);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // ── header (3 lines) ─────────────────────────────────────────────────────
-    let live_span = if running {
-        Span::styled("● LIVE", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-    } else {
-        Span::styled("○ off", Style::default().fg(Color::DarkGray))
-    };
-    let state_label = if paused {
-        "  PAUSED"
-    } else if scrolled {
-        "  scroll (End = tail)"
-    } else {
-        "  streaming"
-    };
-    let state_span = Span::styled(
-        state_label,
-        Style::default().fg(if paused || scrolled { Color::Yellow } else { Color::DarkGray }),
-    );
-    let pkg_span = if !app.effective_packages.is_empty() {
-        if app.show_all_logs {
-            Span::styled("  [all]", Style::default().fg(Color::DarkGray))
+    // ── filter bar (only when active) ────────────────────────────────────
+    let filter_line: Option<Line> = if app.filter_focused || !app.filter_input.is_empty() {
+        Some(if app.filter_focused {
+            Line::from(vec![
+                Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    &app.filter_input,
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("█", Style::default().fg(Color::Cyan)),
+            ])
         } else {
-            Span::styled("  [pkg]", Style::default().fg(Color::Cyan))
-        }
+            Line::from(vec![
+                Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(&app.filter_input, Style::default().fg(Color::Cyan)),
+            ])
+        })
     } else {
-        Span::raw("")
-    };
-    let filter_line = if app.filter_focused {
-        Line::from(vec![
-            Span::styled("filter: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&app.filter_input, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled("█", Style::default().fg(Color::Cyan)),
-        ])
-    } else if !app.filter_input.is_empty() {
-        Line::from(vec![
-            Span::styled("filter: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&app.filter_input, Style::default().fg(Color::Cyan)),
-        ])
-    } else {
-        Line::from(Span::styled("no filter", Style::default().fg(Color::DarkGray)))
+        None
     };
 
-    let header = vec![
-        Line::from(vec![live_span, state_span, pkg_span]),
-        filter_line,
-        Line::from(""),
-    ];
-    let header_h = header.len() as u16;
-    let visible_rows = inner.height.saturating_sub(header_h + 1).max(1) as usize;
-
-    // ── build log lines with wrapping ────────────────────────────────────────
+    let header_h = filter_line.is_some() as u16;
+    let visible_rows = inner.height.saturating_sub(header_h).max(1) as usize;
     let msg_width = (inner.width as usize).saturating_sub(PREFIX_WIDTH).max(20);
-    let total = app.log_lines.len();
 
-    // Build all visual lines first so we know how many there are for scroll.
-    // We process entries in REVERSE from the scroll position to fill `visible_rows`.
-    let scroll = app.log_scroll;
+    let total = app.log_lines.len();
+    let scroll = app.log_scroll.min(total.saturating_sub(visible_rows));
     let entry_end = total.saturating_sub(scroll);
 
-    let mut last_tag: String = String::new();
-
-    // Collect entries from the end, building lines until we have enough
     let mut collected: Vec<Line> = Vec::new();
+    let mut last_tag = String::new();
+
+    // Iterate entries from bottom upward, collecting visual lines
     for entry in app.log_lines[..entry_end].iter().rev() {
-        if collected.len() >= visible_rows * 2 {
-            // Enough pre-collected; trim later
+        if collected.len() >= visible_rows * 3 {
             break;
         }
         let lc = &entry.level;
         let lvl_color = level_style(lc);
         let tc = tag_color(&entry.tag, &mut app.tag_color_cache);
-        let is_stack = looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
+        let is_stack =
+            looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
         let msg_fg = if is_stack {
             Color::LightRed
         } else {
@@ -123,21 +100,21 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect, border: Style) {
         } else {
             Modifier::empty()
         };
-
         let lvl_style_span = match lc.as_str() {
-            "E" | "F" => Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD),
-            "W" => Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD),
+            "E" | "F" => {
+                Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
+            }
+            "W" => Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
             _ => Style::default().fg(lvl_color).add_modifier(Modifier::BOLD),
         };
 
-        // Word-wrap the message into chunks
         let chunks = word_wrap(&entry.message, msg_width);
 
-        // Build lines in REVERSE (since we're iterating entries in reverse)
         for (ci, chunk) in chunks.into_iter().enumerate().rev() {
-            let is_first_chunk = ci == 0;
-            if is_first_chunk {
-                // Show timestamp + tag + level
+            if ci == 0 {
                 let show_tag = entry.tag != last_tag;
                 let tag_display = if show_tag {
                     right_pad(&entry.tag, TAG_WIDTH)
@@ -147,13 +124,12 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect, border: Style) {
                 let tag_style = if show_tag {
                     Style::default().fg(tc)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(Color::Rgb(40, 40, 55))
                 };
-
                 collected.push(Line::from(vec![
                     Span::styled(
                         format!("{:<width$} ", entry.timestamp, width = TS_WIDTH),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(Color::Rgb(80, 80, 100)),
                     ),
                     Span::styled(tag_display, tag_style),
                     Span::raw(" "),
@@ -162,27 +138,31 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect, border: Style) {
                     Span::styled(chunk, Style::default().fg(msg_fg).add_modifier(msg_modifier)),
                 ]));
             } else {
-                // Continuation line: blank prefix + chunk
-                let blank_prefix = " ".repeat(TS_WIDTH + 1 + TAG_WIDTH + 1 + 3 + 1);
+                let blank = " ".repeat(PREFIX_WIDTH);
                 collected.push(Line::from(vec![
-                    Span::raw(blank_prefix),
+                    Span::raw(blank),
                     Span::styled(chunk, Style::default().fg(msg_fg).add_modifier(msg_modifier)),
                 ]));
             }
         }
-
-        // Update last_tag after processing this entry (we're going in reverse)
         last_tag = entry.tag.clone();
     }
 
-    // Reverse collected (we built it bottom-up) and take last `visible_rows`
     collected.reverse();
     let start = collected.len().saturating_sub(visible_rows);
-    let mut lines = header;
+
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(fl) = filter_line {
+        lines.push(fl);
+    }
 
     if total == 0 {
         lines.push(Line::from(Span::styled(
-            if running { "Waiting for log lines…" } else { "Press l to start logcat" },
+            if running {
+                " Waiting for log lines…"
+            } else {
+                " Press l to start logcat"
+            },
             Style::default().fg(Color::DarkGray),
         )));
     } else {
@@ -192,8 +172,6 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect, border: Style) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Word-wrap `msg` into lines of at most `max_chars` characters.
-/// Breaks at word boundaries where possible.
 fn word_wrap(msg: &str, max_chars: usize) -> Vec<String> {
     if max_chars == 0 {
         return vec![msg.to_string()];
@@ -204,8 +182,7 @@ fn word_wrap(msg: &str, max_chars: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut remaining = msg;
     while !remaining.is_empty() {
-        let char_count = remaining.chars().count();
-        if char_count <= max_chars {
+        if remaining.chars().count() <= max_chars {
             lines.push(remaining.to_string());
             break;
         }
@@ -222,11 +199,9 @@ fn word_wrap(msg: &str, max_chars: usize) -> Vec<String> {
     lines
 }
 
-/// Right-pad a string to `width` chars, truncating with no ellipsis if too long.
 fn right_pad(s: &str, width: usize) -> String {
     let count = s.chars().count();
     if count >= width {
-        // Clip without ellipsis to avoid confusion with actual content
         s.chars().take(width).collect()
     } else {
         format!("{s}{}", " ".repeat(width - count))

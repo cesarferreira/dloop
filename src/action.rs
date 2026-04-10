@@ -2,37 +2,37 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
+    // Global
     RefreshDevices,
-    NextPane,
-    PrevPane,
-    // Devices pane
-    NextDevice,
-    PrevDevice,
-    // Logcat pane
+    // Logcat
     ToggleLogcat,
     FocusFilter,
     ClearLogs,
     ToggleLogcatPause,
-    TogglePackageFilter,   // 'a' — all logs vs filtered by package
+    TogglePackageFilter,
     ScrollUp,
     ScrollDown,
     ScrollPageUp,
     ScrollPageDown,
-    ScrollTail,            // End / 'G' — jump back to tail
-    // Build pane
+    ScrollTail,
+    // Build
     BuildDebug,
     InstallDebug,
-    RunApp,                // install + launch the app
-    ToggleBuildExpand,     // 'e' — expand/collapse build output
-    OpenVariantPicker,     // 'v' — pick build variant
-    StopProcess,
-    LaunchScrcpy,
-    // Variant picker navigation
+    RunApp,
+    ToggleBuildExpand,
+    // Popups
+    OpenVariantPicker,
+    OpenDevicePicker,
+    OpenBuildPopup,
+    OpenPackagePicker,
+    // Shared popup navigation
     PickerNext,
     PickerPrev,
     PickerConfirm,
     PickerCancel,
     // Misc
+    LaunchScrcpy,
+    StopProcess,
     ConfirmYes,
     ConfirmNo,
 }

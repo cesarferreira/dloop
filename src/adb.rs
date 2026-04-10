@@ -8,7 +8,6 @@ use which::which;
 #[derive(Debug, Clone)]
 pub struct Device {
     pub serial: String,
-    pub state: String,
     pub model: String,
 }
 
@@ -46,7 +45,8 @@ impl AdbClient {
                 continue;
             }
             let serial = parts[0].to_string();
-            let state = parts[1].to_string();
+            let state = parts[1];
+            // Skip "no permissions" pseudo-entries
             if serial == "no" && state == "permissions" {
                 continue;
             }
@@ -62,11 +62,7 @@ impl AdbClient {
                 model = serial.clone();
             }
 
-            devices.push(Device {
-                serial,
-                state,
-                model,
-            });
+            devices.push(Device { serial, model });
         }
 
         Ok(devices)

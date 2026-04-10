@@ -19,7 +19,6 @@ pub enum Action {
     BuildDebug,
     InstallDebug,
     RunApp,
-    ToggleBuildExpand,
     // Popups
     OpenVariantPicker,
     OpenDevicePicker,

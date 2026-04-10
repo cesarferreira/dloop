@@ -632,10 +632,6 @@ impl App {
             Action::ScrollTail => {
                 self.log_scroll = 0;
             }
-            Action::ToggleBuildExpand => {
-                self.build_popup_open = !self.build_popup_open;
-                self.build_popup_scroll = 0;
-            }
             // ── popup opens ───────────────────────────────────────────────
             Action::OpenVariantPicker => {
                 if !self.picker_variants.is_empty() {

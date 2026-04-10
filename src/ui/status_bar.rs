@@ -71,6 +71,7 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     spans.extend(c("Tab", "panes", Color::Rgb(166, 227, 161)));
     spans.extend(c("b", "build", Color::Rgb(137, 180, 250)));
     spans.extend(c("i", "install", Color::Rgb(245, 194, 231)));
+    spans.extend(c("n", "run", Color::Rgb(166, 227, 161)));
     spans.extend(c("v", "variant", Color::Rgb(180, 190, 254)));
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
     spans.extend(c("a", "all/pkg", Color::Rgb(249, 226, 175)));

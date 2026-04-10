@@ -95,9 +95,11 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers, pane: Pane) -> Option<AppEven
         }
         KeyCode::Char('G') if pane == Pane::Logs => Some(Action::ScrollTail),
 
-        KeyCode::Char('r') | KeyCode::Char('R') => Some(Action::RefreshDevices),
+        KeyCode::Char('r') => Some(Action::RefreshDevices),
         KeyCode::Char('b') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::BuildDebug),
         KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::InstallDebug),
+        // 'n' = ruN: install (build+install) then launch the app
+        KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::RunApp),
         KeyCode::Char('l') | KeyCode::Char('L') => Some(Action::ToggleLogcat),
         KeyCode::Char('f') | KeyCode::Char('F') => Some(Action::FocusFilter),
         KeyCode::Char('c') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ClearLogs),
@@ -108,7 +110,6 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers, pane: Pane) -> Option<AppEven
         KeyCode::Char('e') | KeyCode::Char('E') => Some(Action::ToggleBuildExpand),
         KeyCode::Char('v') | KeyCode::Char('V') => Some(Action::OpenVariantPicker),
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::ConfirmYes),
-        KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::ConfirmNo),
 
         // Device navigation fallback when NOT in logs pane
         KeyCode::Char('k') | KeyCode::Char('K')

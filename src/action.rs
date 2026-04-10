@@ -22,6 +22,7 @@ pub enum Action {
     // Build pane
     BuildDebug,
     InstallDebug,
+    RunApp,                // install + launch the app
     ToggleBuildExpand,     // 'e' — expand/collapse build output
     OpenVariantPicker,     // 'v' — pick build variant
     StopProcess,

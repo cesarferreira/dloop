@@ -174,6 +174,8 @@ pub struct App {
     pub log_scroll: usize,
     /// When true, show ALL logcat lines (no package filter). Default = true.
     pub show_all_logs: bool,
+    /// When true, launch the app after the current build finishes successfully.
+    pub launch_after_build: bool,
 
     // Variant picker state
     pub picker_open: bool,
@@ -241,7 +243,8 @@ impl App {
             effective_assemble,
             effective_install,
             log_scroll: 0,
-            show_all_logs: true, // show everything by default; 'a' toggles package filter
+            show_all_logs: true,
+            launch_after_build: false,
             picker_open: false,
             picker_cursor: 0,
             picker_variants,
@@ -456,11 +459,52 @@ impl App {
                 Ok(Some(status)) => {
                     let code = status.code();
                     self.build_child = None;
+                    let do_launch = self.launch_after_build && code == Some(0);
+                    self.launch_after_build = false;
                     self.finish_build_record(code);
+                    if do_launch {
+                        self.launch_app();
+                    }
                 }
                 Ok(None) => {}
                 Err(_) => {}
             }
+        }
+    }
+
+    fn launch_app(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            return;
+        };
+        // Use the first known package; fall back to noop.
+        let package = match self.effective_packages.first() {
+            Some(p) => p.clone(),
+            None => {
+                self.show_toast("No package known — can't launch");
+                return;
+            }
+        };
+        // `monkey -p <pkg> -c android.intent.category.LAUNCHER 1` reliably starts the app.
+        let result = std::process::Command::new(&self.adb.adb_path)
+            .args([
+                "-s",
+                &serial,
+                "shell",
+                "monkey",
+                "-p",
+                &package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ])
+            .output();
+        match result {
+            Ok(out) if out.status.success() => self.show_toast(format!("Launched {package}")),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                self.show_toast(format!("Launch failed: {stderr}"));
+            }
+            Err(e) => self.show_toast(format!("Launch error: {e}")),
         }
     }
 
@@ -604,15 +648,26 @@ impl App {
                 self.picker_open = false;
             }
             Action::BuildDebug => {
+                self.launch_after_build = false;
                 let task = self.effective_assemble.clone();
                 if let Err(e) = self.run_build_task(&task) {
                     self.show_toast(format!("build: {e}"));
                 }
             }
             Action::InstallDebug => {
+                self.launch_after_build = false;
                 let task = self.effective_install.clone();
                 if let Err(e) = self.run_build_task(&task) {
                     self.show_toast(format!("install: {e}"));
+                }
+            }
+            Action::RunApp => {
+                // install task builds + installs in one step; then we launch
+                self.launch_after_build = true;
+                let task = self.effective_install.clone();
+                if let Err(e) = self.run_build_task(&task) {
+                    self.launch_after_build = false;
+                    self.show_toast(format!("run: {e}"));
                 }
             }
             Action::StopProcess => {

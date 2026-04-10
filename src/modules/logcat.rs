@@ -1,0 +1,246 @@
+//! Logcat line parsing and filtering (rustycat-inspired).
+use crate::adb::AdbClient;
+use anyhow::Result;
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::Sender;
+use std::thread;
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub raw: String,
+    pub timestamp: String,
+    pub pid: String,
+    pub tag: String,
+    pub level: String,
+    pub message: String,
+}
+
+/// Parse standard `logcat -v time` line.
+pub fn parse_log_line(line: &str) -> Option<LogEntry> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 6 {
+        return None;
+    }
+
+    let time_parts: Vec<&str> = parts[1].split('.').collect();
+    let time = time_parts[0];
+    let ms_raw = time_parts.get(1).unwrap_or(&"000");
+    let mut ms_fixed: String = ms_raw.chars().take(3).collect();
+    while ms_fixed.len() < 3 {
+        ms_fixed.push('0');
+    }
+    let timestamp = format!("{}.{}", time, ms_fixed);
+
+    let pid = parts[2].to_string();
+    let level = parts[4].to_string();
+    let tag_and_message = parts[5..].join(" ");
+    let (tag, message) = if let Some(pos) = tag_and_message.find(": ") {
+        let (t, m) = tag_and_message.split_at(pos);
+        (t.trim().trim_end_matches(':').to_string(), m.trim_start_matches(": ").to_string())
+    } else {
+        (tag_and_message.clone(), String::new())
+    };
+
+    Some(LogEntry {
+        raw: line.to_string(),
+        timestamp,
+        pid,
+        tag,
+        level,
+        message,
+    })
+}
+
+pub fn level_style(level: &str) -> ratatui::style::Color {
+    use ratatui::style::Color::*;
+    match level {
+        "D" => Cyan,
+        "I" => Green,
+        "W" => Yellow,
+        "E" => Red,
+        "V" => Blue,
+        "F" => Red,
+        _ => Gray,
+    }
+}
+
+const TAG_COLORS: &[ratatui::style::Color] = &[
+    ratatui::style::Color::Red,
+    ratatui::style::Color::Green,
+    ratatui::style::Color::Yellow,
+    ratatui::style::Color::Blue,
+    ratatui::style::Color::Magenta,
+    ratatui::style::Color::Cyan,
+    ratatui::style::Color::LightRed,
+    ratatui::style::Color::LightGreen,
+    ratatui::style::Color::LightYellow,
+    ratatui::style::Color::LightBlue,
+    ratatui::style::Color::LightMagenta,
+    ratatui::style::Color::LightCyan,
+];
+
+pub fn tag_color(tag: &str, cache: &mut HashMap<String, usize>) -> ratatui::style::Color {
+    let idx = if let Some(&i) = cache.get(tag) {
+        i
+    } else {
+        let i = cache.len();
+        cache.insert(tag.to_string(), i);
+        i
+    };
+    TAG_COLORS[idx % TAG_COLORS.len()]
+}
+
+pub struct LogcatFilter {
+    /// When true and `pids` is non-empty, only lines whose PID is in `pids` pass.
+    pub filter_by_application_ids: bool,
+    pub tag_substrings: Vec<String>,
+    pub levels: Option<String>, // e.g. "D,I,W,E"
+    pub content: Option<String>,
+    pub exclude: Option<String>,
+}
+
+impl LogcatFilter {
+    pub fn allows(&self, entry: &LogEntry, pids: &[String]) -> bool {
+        if self.filter_by_application_ids && !pids.is_empty() && !pids.contains(&entry.pid) {
+            return false;
+        }
+        if !self.tag_substrings.is_empty() {
+            let tag_lower = entry.tag.to_lowercase();
+            let any = self.tag_substrings.iter().any(|t| {
+                !t.is_empty() && tag_lower.contains(&t.to_lowercase())
+            });
+            if !any {
+                return false;
+            }
+        }
+        if let Some(ref lv) = self.levels {
+            if !lv.is_empty() && !lv.split(',').any(|x| x.trim() == entry.level) {
+                return false;
+            }
+        }
+        if let Some(ref c) = self.content {
+            if !c.is_empty() {
+                let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
+                if !hay.contains(&c.to_lowercase()) {
+                    return false;
+                }
+            }
+        }
+        if let Some(ref e) = self.exclude {
+            if !e.is_empty() {
+                let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
+                if hay.contains(&e.to_lowercase()) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+pub fn spawn_logcat_reader(
+    adb_path: &Path,
+    device: &str,
+    tx: Sender<String>,
+) -> Result<Child> {
+    let mut child = Command::new(adb_path)
+        .args(["-s", device, "logcat", "-v", "time"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stdout = child.stdout.take().expect("stdout");
+    let stderr = child.stderr.take().expect("stderr");
+    let tx_err = tx.clone();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let t = line.trim_end().to_string();
+                    if tx.send(t).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let t = line.trim_end().to_string();
+                    let _ = tx_err.send(format!("[adb logcat stderr] {t}"));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(child)
+}
+
+/// Resolve PIDs for one package pattern (may be empty if app not running).
+pub fn refresh_pids(adb: &AdbClient, device: &str, pattern: &str) -> Result<Vec<String>> {
+    if pattern.is_empty() {
+        return Ok(vec![]);
+    }
+    adb.pids_for_package(device, pattern)
+}
+
+/// Merge PIDs for all application IDs (e.g. `ai.wayve.app` and `ai.wayve.app.dev`).
+pub fn refresh_pids_for_packages(
+    adb: &AdbClient,
+    device: &str,
+    package_ids: &[String],
+) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for id in package_ids {
+        if id.is_empty() {
+            continue;
+        }
+        out.extend(refresh_pids(adb, device, id)?);
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// Clear logcat buffer on device.
+pub fn clear_buffer(adb: &AdbClient, device: &str) -> Result<()> {
+    adb.run_command(&["-s", device, "logcat", "-c"])?;
+    Ok(())
+}
+
+pub fn looks_like_stack_trace(line: &str) -> bool {
+    line.trim_start().starts_with("at ")
+        || line.contains("Exception")
+        || line.contains("Error:")
+        || line.trim_start().starts_with("Caused by:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sample_logcat_line() {
+        let line = "02-03 15:44:41.704  2359  3654 I MyTag: hello world";
+        let e = parse_log_line(line).expect("parse");
+        assert_eq!(e.level, "I");
+        assert_eq!(e.pid, "2359");
+        assert_eq!(e.tag, "MyTag");
+        assert_eq!(e.message, "hello world");
+    }
+}

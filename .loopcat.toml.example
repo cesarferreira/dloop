@@ -1,0 +1,23 @@
+# Copy to .loopcat.toml (or .droid-loop.toml) in your Android project root.
+# If omitted, dloop infers application IDs and default assemble/install tasks from app/build.gradle(.kts).
+
+# Single package (optional if Gradle lists applicationId)
+# package = "com.example.app"
+
+# Or set explicit app IDs (overrides inference), e.g. multiple flavors:
+# packages = ["ai.wayve.app", "ai.wayve.app.dev"]
+
+variant = "debug"
+
+# Optional — inferred as assemble<Flavor>Debug / install<Flavor>Debug when possible
+# assemble_task = "assembleDevDebug"
+# install_task = "installDevDebug"
+
+# Optional: comma-separated levels in log_level for filtering (see modules/logcat.rs)
+log_level = "D,I,W,E,V"
+
+# Tag substrings — line must match at least one if non-empty
+log_filters = ["OkHttp"]
+
+# Extra arguments passed to `scrcpy`
+scrcpy_args = ["--window-title", "DroidLoop"]

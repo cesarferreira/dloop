@@ -24,7 +24,15 @@ pub fn render_popup(f: &mut Frame<'_>, app: &App, area: Rect) {
         ("No build yet".to_string(), Color::DarkGray)
     };
 
-    let title = format!(" Build  {status_text}  ↑↓ scroll  Esc close ");
+    let countdown = app.build_popup_auto_close.map(|deadline| {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        format!("  closing in {}s", remaining.as_secs() + 1)
+    });
+    let title = if let Some(cd) = countdown {
+        format!(" Build  {status_text}{cd}  ↑↓ scroll  Esc close ")
+    } else {
+        format!(" Build  {status_text}  ↑↓ scroll  Esc close ")
+    };
     let block = Block::default()
         .title(Span::styled(title, Style::default().fg(status_color).add_modifier(Modifier::BOLD)))
         .borders(Borders::ALL)

@@ -65,13 +65,9 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     }
 }
 
-/// Render a dark semi-opaque overlay to visually suppress background content.
-/// Uses DIM + near-black to create a "behind the modal" effect without `Clear`.
+/// Render a subtle dim overlay to visually recede background content behind popups.
 fn dim_overlay(f: &mut Frame<'_>, area: ratatui::layout::Rect) {
     use ratatui::widgets::Paragraph;
-    // We fill every cell with a near-black background + the DIM attribute.
-    // The terminal will render these cells over the existing content, effectively
-    // making the background appear dark/greyed out behind the popup.
     let overlay = Paragraph::new(
         (0..area.height)
             .map(|_| ratatui::text::Line::from(" ".repeat(area.width as usize)))
@@ -79,7 +75,7 @@ fn dim_overlay(f: &mut Frame<'_>, area: ratatui::layout::Rect) {
     )
     .style(
         Style::default()
-            .bg(Color::Rgb(8, 8, 14))
+            .bg(Color::Rgb(18, 18, 28))
             .add_modifier(Modifier::DIM),
     );
     f.render_widget(overlay, area);

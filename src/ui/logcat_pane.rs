@@ -69,17 +69,34 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     let visible_rows = inner.height.saturating_sub(header_h).max(1) as usize;
     let msg_width = (inner.width as usize).saturating_sub(PREFIX_WIDTH).max(20);
 
+    let filter_lower = if app.filter_input.is_empty() {
+        None
+    } else {
+        Some(app.filter_input.to_lowercase())
+    };
+
     let total = app.log_lines.len();
     let scroll = app.log_scroll.min(total.saturating_sub(visible_rows));
-    let entry_end = total.saturating_sub(scroll);
 
     let mut collected: Vec<Line> = Vec::new();
     let mut last_tag = String::new();
+    let mut skipped = 0usize;
 
-    // Iterate entries from bottom upward, collecting visual lines
-    for entry in app.log_lines[..entry_end].iter().rev() {
+    for entry in app.log_lines.iter().rev() {
         if collected.len() >= visible_rows * 3 {
             break;
+        }
+        // Apply text filter to existing lines
+        if let Some(ref needle) = filter_lower {
+            let hay = format!("{} {} {}", entry.tag, entry.level, entry.message).to_lowercase();
+            if !hay.contains(needle.as_str()) {
+                continue;
+            }
+        }
+        // Handle scroll: skip the first `scroll` matching entries from the bottom
+        if skipped < scroll {
+            skipped += 1;
+            continue;
         }
         let lc = &entry.level;
         let lvl_color = level_style(lc);

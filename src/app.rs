@@ -140,6 +140,8 @@ pub struct App {
 
     pub build_popup_open: bool,
     pub build_popup_scroll: usize,
+    /// When set, the build popup auto-closes once this instant is reached.
+    pub build_popup_auto_close: Option<Instant>,
 
     pub package_picker_open: bool,
     pub package_picker_input: String,
@@ -266,6 +268,7 @@ impl App {
             device_picker_cursor: 0,
             build_popup_open: false,
             build_popup_scroll: 0,
+            build_popup_auto_close: None,
             package_picker_open: false,
             package_picker_input: String::new(),
             package_picker_cursor: 0,
@@ -481,6 +484,10 @@ impl App {
             } else {
                 self.show_toast(format!("{task} failed: exit {code:?}"));
             }
+            // Start the auto-close countdown (3 seconds) for the build popup.
+            if self.build_popup_open {
+                self.build_popup_auto_close = Some(Instant::now() + Duration::from_secs(3));
+            }
         }
     }
 
@@ -511,6 +518,9 @@ impl App {
         self.build_child = Some(spawn.child);
         self.build_task = Some(task.to_string());
         self.build_start = Some(Instant::now());
+        self.build_popup_open = true;
+        self.build_popup_scroll = 0;
+        self.build_popup_auto_close = None;
         Ok(())
     }
 
@@ -616,6 +626,10 @@ impl App {
             Action::FocusFilter => {
                 self.filter_focused = !self.filter_focused;
             }
+            Action::ClearFilter => {
+                self.filter_input.clear();
+                self.filter_focused = false;
+            }
             Action::ConfirmNo => {
                 self.filter_focused = false;
                 self.picker_open = false;
@@ -636,6 +650,7 @@ impl App {
             Action::ScrollUp => {
                 if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_add(1);
+                    self.build_popup_auto_close = None;
                 } else {
                     self.log_scroll = self.log_scroll.saturating_add(1);
                 }
@@ -643,6 +658,7 @@ impl App {
             Action::ScrollDown => {
                 if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_sub(1);
+                    self.build_popup_auto_close = None;
                 } else {
                     self.log_scroll = self.log_scroll.saturating_sub(1);
                 }
@@ -670,6 +686,7 @@ impl App {
             Action::OpenBuildPopup => {
                 self.build_popup_open = !self.build_popup_open;
                 self.build_popup_scroll = 0;
+                self.build_popup_auto_close = None;
             }
             Action::OpenPackagePicker => {
                 self.package_picker_open = true;
@@ -846,6 +863,14 @@ pub fn run_app(
         if let Some((_, t)) = &app.toast {
             if t.elapsed() > Duration::from_secs(4) {
                 app.toast = None;
+            }
+        }
+
+        // Auto-close the build popup after the countdown expires.
+        if let Some(deadline) = app.build_popup_auto_close {
+            if Instant::now() >= deadline {
+                app.build_popup_open = false;
+                app.build_popup_auto_close = None;
             }
         }
 

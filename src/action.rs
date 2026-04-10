@@ -7,6 +7,7 @@ pub enum Action {
     // Logcat
     ToggleLogcat,
     FocusFilter,
+    ClearFilter,
     ClearLogs,
     ToggleLogcatPause,
     TogglePackageFilter,

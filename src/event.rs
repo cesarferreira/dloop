@@ -81,10 +81,9 @@ fn map_package_picker(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent
 
 fn map_filter(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
     match code {
-        KeyCode::Esc => Some(AppEvent::Action(Action::ConfirmNo)),
+        KeyCode::Esc => Some(AppEvent::Action(Action::ClearFilter)),
         KeyCode::Enter => Some(AppEvent::Action(Action::FocusFilter)),
         KeyCode::Backspace => Some(AppEvent::Backspace),
-        KeyCode::Char('q') | KeyCode::Char('Q') => Some(AppEvent::Action(Action::Quit)),
         KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => Some(AppEvent::Text(c)),
         _ => None,
     }

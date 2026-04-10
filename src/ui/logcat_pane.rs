@@ -86,15 +86,7 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         let tc = tag_color(&entry.tag, &mut app.tag_color_cache);
         let is_stack =
             looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
-        let msg_fg = if is_stack {
-            Color::LightRed
-        } else {
-            match lc.as_str() {
-                "E" | "F" => Color::LightRed,
-                "W" => Color::Yellow,
-                _ => Color::White,
-            }
-        };
+        let msg_fg = lvl_color;
         let msg_modifier = if is_stack || matches!(lc.as_str(), "E" | "F") {
             Modifier::BOLD
         } else {

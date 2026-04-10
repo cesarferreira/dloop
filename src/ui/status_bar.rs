@@ -75,6 +75,10 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
     spans.extend(c("a", "all/pkg", Color::Rgb(249, 226, 175)));
     spans.extend(c("f", "filter", Color::Rgb(249, 226, 175)));
+    spans.extend(c("x", "exclude", Color::Rgb(250, 179, 135)));
+    spans.extend(c("w", "export", Color::Rgb(166, 218, 149)));
+    spans.extend(c("y", "yank", Color::Rgb(243, 188, 219)));
+    spans.extend(c("H", "history", Color::Rgb(180, 190, 254)));
     spans.extend(c("c", "clear", Color::Rgb(137, 220, 235)));
     spans.extend(c("s", "stop", Color::Rgb(243, 139, 168)));
     spans.extend(c("m", "scrcpy", Color::Rgb(180, 190, 254)));

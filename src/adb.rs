@@ -69,7 +69,6 @@ impl AdbClient {
     }
 
     /// Relevant getprop keys for device info display.
-    #[allow(dead_code)]
     pub fn get_device_props(&self, serial: &str) -> Result<HashMap<String, String>> {
         let output = self.run_command(&["-s", serial, "shell", "getprop"])?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -90,6 +89,21 @@ impl AdbClient {
             }
         }
         Ok(info)
+    }
+
+    /// Battery level 0–100 from `dumpsys battery`, if present.
+    pub fn get_battery_level(&self, serial: &str) -> Result<Option<u8>> {
+        let output = self.run_command(&["-s", serial, "shell", "dumpsys", "battery"])?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix("level:") {
+                if let Ok(v) = rest.trim().parse::<u8>() {
+                    return Ok(Some(v));
+                }
+            }
+        }
+        Ok(None)
     }
 
     #[allow(dead_code)]

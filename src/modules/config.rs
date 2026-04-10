@@ -21,6 +21,9 @@ pub struct ProjectConfig {
     pub gradle_tasks: Vec<String>,
     #[serde(default)]
     pub log_filters: Vec<String>,
+    /// Substrings: line is dropped if it matches any (same as runtime exclude filter).
+    #[serde(default)]
+    pub exclude_filters: Vec<String>,
     pub log_level: Option<String>,
     pub assemble_task: Option<String>,
     pub install_task: Option<String>,
@@ -42,8 +45,7 @@ impl MergedConfig {
 
         let project_path = project_config_path(&project_root);
         let project = if let Some(ref path) = project_path {
-            let s = fs::read_to_string(path)
-                .with_context(|| format!("read {}", path.display()))?;
+            let s = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
             toml::from_str(&s).with_context(|| "parse project config")?
         } else {
             ProjectConfig::default()
@@ -93,7 +95,6 @@ pub fn save_global_config(cfg: &GlobalConfig) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn save_project_config(project_root: &Path, cfg: &ProjectConfig) -> Result<()> {
     let path = project_root.join(".loopcat.toml");
     let s = toml::to_string_pretty(cfg)?;

@@ -34,17 +34,22 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
             let sel = i == app.picker_cursor;
             let active = assemble == &app.effective_assemble;
             let bg = if sel { Color::Cyan } else { Color::Reset };
-            let fg = if sel { Color::Black } else if active { Color::Green } else { Color::White };
+            let fg = if sel {
+                Color::Black
+            } else if active {
+                Color::Green
+            } else {
+                Color::White
+            };
             let prefix = if active { "● " } else { "  " };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{prefix}{label}"),
-                    Style::default()
-                        .fg(fg)
-                        .bg(bg)
-                        .add_modifier(if sel { Modifier::BOLD } else { Modifier::empty() }),
-                ),
-            ]))
+            ListItem::new(Line::from(vec![Span::styled(
+                format!("{prefix}{label}"),
+                Style::default().fg(fg).bg(bg).add_modifier(if sel {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+            )]))
         })
         .collect();
 

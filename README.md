@@ -20,17 +20,20 @@ Replace Android Studio's run/debug panel with a fast TUI that sits beside your e
 
 ## Features
 
-- **Device management** — lists connected ADB devices, auto-refreshes when one connects or disconnects
+- **Device management** — lists connected ADB devices; shows Android version, API level, and battery when available
 - **Gradle inference** — detects `applicationId`, `productFlavors`, and `flavorDimensions` from `app/build.gradle(.kts)`; picks the right `assemble<Variant>Debug` / `install<Variant>Debug` task automatically
 - **Multi-dimension flavors** — handles `canaryDevDebug`, `stableProdRelease`-style variants across multiple flavor dimensions
-- **Build & Install** — spawns Gradle as a subprocess, streams output live; expandable build pane
+- **Build & Install** — spawns Gradle as a subprocess, streams output live; expandable build pane; **build history** overlay (`H`)
 - **Run** — install + auto-launch the app with one keystroke
 - **Variant picker** — floating overlay to switch build variant without editing config files
 - **Logcat streaming** — live `adb logcat` with rustycat-style rendering: 23-char tag column, tag repeat suppression, word-wrapped messages
+- **Crash / ANR highlighting** — detected crash blocks get a red highlight; count in the info bar; **y** copies the last crash to the clipboard
 - **Scrollable log** — scroll back through history with `↑`/`↓` or `j`/`k`, `End` to return to tail
-- **Filter** — live text filter across tag + message; toggle between "all logs" and package-only mode
+- **Filter** — live text filter across tag + message; **exclude** filter (`x`) and config `exclude_filters` to drop noisy lines
+- **Export** — **w** writes the current (pane-filtered) log buffer to `dloop-<unix_ts>.log` in the project root
 - **scrcpy** — launch screen mirroring for the selected device
-- **Per-project config** — `.loopcat.toml` overrides for packages, tasks, log level, scrcpy args
+- **Per-project config** — `.loopcat.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
+- **`dloop init`** — scaffold `.loopcat.toml` from Gradle inference
 
 ## Requirements
 
@@ -49,6 +52,9 @@ Binary name: **`dloop`**
 # Cargo (installs to ~/.cargo/bin)
 make install
 
+# Homebrew (after publishing release artifacts; tap is cesarferreira/tap)
+brew install cesarferreira/tap/dloop
+
 # User-local (installs to ~/.local/bin)
 make install-user
 
@@ -58,6 +64,8 @@ make install-system
 
 To uninstall: `make uninstall`, `make uninstall-user`, or `make uninstall-system`.
 
+Release tarballs and checksums for Homebrew: `make release` (requires optional `rustup target add` for cross-compiles).
+
 ## Usage
 
 Run from your Android project root:
@@ -66,6 +74,13 @@ Run from your Android project root:
 dloop
 # or point at a project
 dloop --project /path/to/my/android/app
+```
+
+Scaffold config without starting the TUI:
+
+```bash
+dloop init
+dloop init --project /path/to/android/project
 ```
 
 dloop opens immediately. If a device is connected, logcat starts automatically.
@@ -80,7 +95,11 @@ dloop opens immediately. If a device is connected, logcat starts automatically.
 | `v` | Open variant picker |
 | `l` | Toggle logcat on/off |
 | `a` | Toggle all-logs ↔ package-filter mode |
-| `f` | Open/close filter input |
+| `f` | Open/close **include** filter input |
+| `x` | Open/close **exclude** filter input |
+| `w` | Export visible log lines to `dloop-<timestamp>.log` |
+| `y` | Copy last captured crash block to clipboard (`pbcopy` / `xclip` / `wl-copy`) |
+| `H` / `h` | Open/close build history overlay |
 | `Space` | Pause / resume log streaming |
 | `↑` / `↓` | Scroll logcat (when Logs pane active) or navigate devices |
 | `j` / `k` | Same as ↑/↓ (vim style) |
@@ -91,10 +110,11 @@ dloop opens immediately. If a device is connected, logcat starts automatically.
 | `m` | Launch scrcpy |
 | `s` | Stop current Gradle / logcat process |
 | `r` | Refresh device list |
-| `Tab` / `Shift+Tab` | Cycle panes |
+| `d` | Device picker |
+| `p` | Package filter picker |
 | `q` | Quit |
 
-In filter mode: type to narrow, `Enter` or `Esc` to close.  
+In filter / exclude mode: type to edit, `Enter` or `Esc` to close.  
 In variant picker: `↑`/`↓` to move, `Enter` to select, `Esc` to cancel.
 
 ## Gradle Inference
@@ -143,6 +163,7 @@ install_task  = "installCanaryDevDebug"
 # Logcat
 log_level   = "D"
 log_filters = ["OkHttp", "MyApp"]
+exclude_filters = ["chatty", "ViewRootImpl"]
 
 # scrcpy extra flags
 scrcpy_args = ["--window-title", "MyApp Mirror"]

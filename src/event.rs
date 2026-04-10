@@ -16,10 +16,12 @@ pub enum AppEvent {
 pub enum Modal {
     None,
     Filter,
+    ExcludeFilter,
     VariantPicker,
     DevicePicker,
     BuildPopup,
     PackagePicker,
+    BuildHistory,
 }
 
 pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<AppEvent>> {
@@ -33,9 +35,11 @@ pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<App
             }
             Ok(match modal {
                 Modal::Filter => map_filter(key.code, key.modifiers),
+                Modal::ExcludeFilter => map_exclude_filter(key.code, key.modifiers),
                 Modal::VariantPicker | Modal::DevicePicker => map_picker(key.code),
                 Modal::BuildPopup => map_build_popup(key.code),
                 Modal::PackagePicker => map_package_picker(key.code, key.modifiers),
+                Modal::BuildHistory => map_build_history(key.code),
                 Modal::None => map_normal(key.code, key.modifiers),
             })
         }
@@ -67,6 +71,18 @@ fn map_build_popup(code: KeyCode) -> Option<AppEvent> {
     Some(AppEvent::Action(a))
 }
 
+fn map_build_history(code: KeyCode) -> Option<AppEvent> {
+    let a = match code {
+        KeyCode::Esc | KeyCode::Char('q') => Action::PickerCancel,
+        KeyCode::Up | KeyCode::Char('k') => Action::PickerPrev,
+        KeyCode::Down | KeyCode::Char('j') => Action::PickerNext,
+        KeyCode::PageUp => Action::ScrollPageUp,
+        KeyCode::PageDown => Action::ScrollPageDown,
+        _ => return None,
+    };
+    Some(AppEvent::Action(a))
+}
+
 fn map_package_picker(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
     match code {
         KeyCode::Esc => Some(AppEvent::Action(Action::PickerCancel)),
@@ -83,6 +99,16 @@ fn map_filter(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
     match code {
         KeyCode::Esc => Some(AppEvent::Action(Action::ClearFilter)),
         KeyCode::Enter => Some(AppEvent::Action(Action::FocusFilter)),
+        KeyCode::Backspace => Some(AppEvent::Backspace),
+        KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => Some(AppEvent::Text(c)),
+        _ => None,
+    }
+}
+
+fn map_exclude_filter(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
+    match code {
+        KeyCode::Esc => Some(AppEvent::Action(Action::ClearExclude)),
+        KeyCode::Enter => Some(AppEvent::Action(Action::FocusExclude)),
         KeyCode::Backspace => Some(AppEvent::Backspace),
         KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => Some(AppEvent::Text(c)),
         _ => None,
@@ -111,13 +137,18 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('G') => Some(Action::ScrollTail),
 
         // Build
-        KeyCode::Char('b') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::BuildDebug),
-        KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::InstallDebug),
+        KeyCode::Char('b') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::BuildDebug)
+        }
+        KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::InstallDebug)
+        }
         KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::RunApp),
 
         // Logcat
         KeyCode::Char('l') | KeyCode::Char('L') => Some(Action::ToggleLogcat),
         KeyCode::Char('f') | KeyCode::Char('F') => Some(Action::FocusFilter),
+        KeyCode::Char('x') | KeyCode::Char('X') => Some(Action::FocusExclude),
         KeyCode::Char('c') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ClearLogs),
         KeyCode::Char(' ') => Some(Action::ToggleLogcatPause),
         KeyCode::Char('a') | KeyCode::Char('A') => Some(Action::TogglePackageFilter),
@@ -127,12 +158,16 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('v') | KeyCode::Char('V') => Some(Action::OpenVariantPicker),
         KeyCode::Char('e') | KeyCode::Char('E') => Some(Action::OpenBuildPopup),
         KeyCode::Char('p') | KeyCode::Char('P') => Some(Action::OpenPackagePicker),
+        KeyCode::Char('H') | KeyCode::Char('h') => Some(Action::OpenBuildHistory),
 
         // Other
         KeyCode::Char('m') | KeyCode::Char('M') => Some(Action::LaunchScrcpy),
-        KeyCode::Char('s') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::StopProcess),
+        KeyCode::Char('s') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::StopProcess)
+        }
         KeyCode::Char('r') => Some(Action::RefreshDevices),
-        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::ConfirmYes),
+        KeyCode::Char('w') | KeyCode::Char('W') => Some(Action::ExportLogs),
+        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::YankLastCrash),
 
         _ => None,
     };

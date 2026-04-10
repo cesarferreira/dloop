@@ -59,6 +59,36 @@ fn row1(app: &App) -> Paragraph<'static> {
             format!("  [{}]", truncate(&d.serial, 10)),
             Style::default().fg(Color::Rgb(70, 90, 110)),
         ));
+
+        let rel = app
+            .device_props
+            .get("ro.build.version.release")
+            .cloned()
+            .unwrap_or_default();
+        let sdk = app
+            .device_props
+            .get("ro.build.version.sdk")
+            .cloned()
+            .unwrap_or_default();
+        if !rel.is_empty() || !sdk.is_empty() {
+            let mut bits: Vec<String> = Vec::new();
+            if !rel.is_empty() {
+                bits.push(format!("Android {rel}"));
+            }
+            if !sdk.is_empty() {
+                bits.push(format!("API {sdk}"));
+            }
+            spans.push(Span::styled(
+                format!("  {}", bits.join(" ")),
+                Style::default().fg(Color::Rgb(130, 140, 170)),
+            ));
+        }
+        if let Some(b) = app.device_battery {
+            spans.push(Span::styled(
+                format!("  🔋{b}%"),
+                Style::default().fg(Color::Rgb(180, 220, 140)),
+            ));
+        }
     }
 
     spans.push(sep());
@@ -168,6 +198,17 @@ fn row2(app: &App) -> Paragraph<'static> {
         ));
     }
 
+    let nc = app.crash_events.len();
+    if nc > 0 {
+        spans.push(sep());
+        spans.push(Span::styled(
+            format!("  {nc} crash{}", if nc == 1 { "" } else { "es" }),
+            Style::default()
+                .fg(Color::Rgb(255, 120, 120))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     Paragraph::new(Line::from(spans)).style(Style::default().bg(BG2))
 }
 
@@ -189,10 +230,7 @@ fn row3(app: &App) -> Paragraph<'static> {
 
     // Priority 2: build/install in progress — prominent animated banner
     if let Some(ref task) = app.build_task {
-        let elapsed = app
-            .build_start
-            .map(|s| s.elapsed().as_secs())
-            .unwrap_or(0);
+        let elapsed = app.build_start.map(|s| s.elapsed().as_secs()).unwrap_or(0);
         let frame = (elapsed as usize) % SPINNER.len();
         let spin = SPINNER[frame];
 
@@ -241,10 +279,7 @@ fn row3(app: &App) -> Paragraph<'static> {
         .unwrap_or("?")
         .to_string();
     spans.push(Span::styled("project  ", Style::default().fg(DIM)));
-    spans.push(Span::styled(
-        path,
-        Style::default().fg(MUTED),
-    ));
+    spans.push(Span::styled(path, Style::default().fg(MUTED)));
 
     if app.filter_focused {
         spans.push(sep());
@@ -252,6 +287,14 @@ fn row3(app: &App) -> Paragraph<'static> {
         spans.push(Span::styled(
             format!("filter: {}", app.filter_input),
             Style::default().fg(Color::Rgb(255, 200, 100)),
+        ));
+    }
+    if app.exclude_focused {
+        spans.push(sep());
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("exclude: {}", app.exclude_input),
+            Style::default().fg(Color::Rgb(255, 160, 120)),
         ));
     }
 

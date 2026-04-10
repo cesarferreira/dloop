@@ -3,8 +3,9 @@
 
 PREFIX ?= /usr/local
 USER_BIN ?= $(HOME)/.local/bin
+REL_VERSION ?= 0.1.0
 
-.PHONY: default install install-user install-system uninstall uninstall-user uninstall-system build test clippy clean fmt check
+.PHONY: default install install-user install-system uninstall uninstall-user uninstall-system build test clippy clean fmt check release
 
 default: build
 
@@ -51,3 +52,19 @@ check: fmt clippy test
 
 clean:
 	cargo clean
+
+# Build release tarballs for Homebrew (host + cross-targets when installed).
+# Update sha256 placeholders in `homebrew-tap/Formula/dloop.rb` from the output.
+release: build
+	mkdir -p dist
+	HOST=$$(rustc -vV | sed -n 's/^host: //p'); \
+	tar -czvf "dist/dloop-$(REL_VERSION)-$$HOST.tar.gz" -C target/release dloop && \
+	shasum -a 256 "dist/dloop-$(REL_VERSION)-$$HOST.tar.gz"
+	@for triple in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do \
+		if rustup target list --installed 2>/dev/null | grep -q "^$$triple$$"; then \
+			echo "Building $$triple..."; \
+			cargo build --release --target "$$triple" && \
+			tar -czvf "dist/dloop-$(REL_VERSION)-$$triple.tar.gz" -C "target/$$triple/release" dloop && \
+			shasum -a 256 "dist/dloop-$(REL_VERSION)-$$triple.tar.gz"; \
+		fi; \
+	done

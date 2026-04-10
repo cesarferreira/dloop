@@ -257,9 +257,19 @@ fn extract_flavors_with_dimensions(text: &str, dimensions: &[String]) -> HashMap
 
     // Groovy DSL: canary { ... }  (a bare identifier followed by braces)
     const SKIP: &[&str] = &[
-        "defaultConfig", "buildTypes", "create", "dimension", "productFlavors",
-        "signingConfigs", "kotlinOptions", "packagingOptions", "packaging",
-        "compileOptions", "buildFeatures", "android", "dependencies",
+        "defaultConfig",
+        "buildTypes",
+        "create",
+        "dimension",
+        "productFlavors",
+        "signingConfigs",
+        "kotlinOptions",
+        "packagingOptions",
+        "packaging",
+        "compileOptions",
+        "buildFeatures",
+        "android",
+        "dependencies",
     ];
     let re_block = Regex::new(r"(?m)^\s{2,}([a-zA-Z_][a-zA-Z0-9_]*)\s*\{").expect("regex");
     for c in re_block.captures_iter(slice) {
@@ -333,7 +343,9 @@ mod tests {
         "#;
         let inf = infer_from_gradle_text(text);
         assert!(inf.application_ids.contains(&"ai.wayve.app".to_string()));
-        assert!(inf.application_ids.contains(&"ai.wayve.app.dev".to_string()));
+        assert!(inf
+            .application_ids
+            .contains(&"ai.wayve.app.dev".to_string()));
         assert_eq!(inf.assemble_task.as_deref(), Some("assembleDevDebug"));
     }
 

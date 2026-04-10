@@ -38,7 +38,9 @@ pub fn spawn_gradle(
         cmd.env("ANDROID_SERIAL", s);
     }
 
-    let mut child = cmd.spawn().map_err(|e| anyhow!("gradlew spawn failed: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow!("gradlew spawn failed: {e}"))?;
 
     let stdout = child.stdout.take().expect("stdout");
     let stderr = child.stderr.take().expect("stderr");

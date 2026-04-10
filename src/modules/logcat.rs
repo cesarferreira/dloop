@@ -16,6 +16,8 @@ pub struct LogEntry {
     pub tag: String,
     pub level: String,
     pub message: String,
+    /// First line of a detected crash / ANR block (for UI highlight).
+    pub crash_start: bool,
 }
 
 /// Parse standard `logcat -v time` line.
@@ -39,7 +41,10 @@ pub fn parse_log_line(line: &str) -> Option<LogEntry> {
     let tag_and_message = parts[5..].join(" ");
     let (tag, message) = if let Some(pos) = tag_and_message.find(": ") {
         let (t, m) = tag_and_message.split_at(pos);
-        (t.trim().trim_end_matches(':').to_string(), m.trim_start_matches(": ").to_string())
+        (
+            t.trim().trim_end_matches(':').to_string(),
+            m.trim_start_matches(": ").to_string(),
+        )
     } else {
         (tag_and_message.clone(), String::new())
     };
@@ -51,7 +56,42 @@ pub fn parse_log_line(line: &str) -> Option<LogEntry> {
         tag,
         level,
         message,
+        crash_start: false,
     })
+}
+
+/// A captured crash / ANR block (cloned lines for export / yank).
+#[derive(Debug, Clone)]
+pub struct CrashEvent {
+    pub timestamp: String,
+    pub summary: String,
+    pub lines: Vec<LogEntry>,
+}
+
+/// Detects the first line of a Java crash or ANR in logcat.
+pub fn is_crash_start(entry: &LogEntry) -> bool {
+    let m = entry.message.to_lowercase();
+    let r = entry.raw.to_lowercase();
+    m.contains("fatal exception")
+        || r.contains("fatal exception")
+        || m.contains("anr in ")
+        || r.contains("anr in ")
+        || m.contains("crash:")
+        || r.contains("crash:")
+}
+
+/// Lines that belong to the same crash stack trace / follow-up.
+pub fn is_crash_continuation(entry: &LogEntry) -> bool {
+    if is_crash_start(entry) {
+        return false;
+    }
+    looks_like_stack_trace(&entry.message)
+        || looks_like_stack_trace(&entry.raw)
+        || entry.message.trim_start().starts_with("at ")
+        || entry.message.contains("Caused by:")
+        || entry.message.contains("Suppressed:")
+        || entry.tag == "AndroidRuntime"
+        || entry.tag == "System.err"
 }
 
 pub fn level_style(level: &str) -> ratatui::style::Color {
@@ -99,7 +139,8 @@ pub struct LogcatFilter {
     pub tag_substrings: Vec<String>,
     pub levels: Option<String>, // e.g. "D,I,W,E"
     pub content: Option<String>,
-    pub exclude: Option<String>,
+    /// If any substring matches tag/message/raw (case-insensitive), the line is dropped.
+    pub exclude_substrings: Vec<String>,
 }
 
 impl LogcatFilter {
@@ -109,9 +150,10 @@ impl LogcatFilter {
         }
         if !self.tag_substrings.is_empty() {
             let tag_lower = entry.tag.to_lowercase();
-            let any = self.tag_substrings.iter().any(|t| {
-                !t.is_empty() && tag_lower.contains(&t.to_lowercase())
-            });
+            let any = self
+                .tag_substrings
+                .iter()
+                .any(|t| !t.is_empty() && tag_lower.contains(&t.to_lowercase()));
             if !any {
                 return false;
             }
@@ -129,10 +171,10 @@ impl LogcatFilter {
                 }
             }
         }
-        if let Some(ref e) = self.exclude {
-            if !e.is_empty() {
-                let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
-                if hay.contains(&e.to_lowercase()) {
+        if !self.exclude_substrings.is_empty() {
+            let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
+            for e in &self.exclude_substrings {
+                if !e.is_empty() && hay.contains(&e.to_lowercase()) {
                     return false;
                 }
             }
@@ -141,11 +183,7 @@ impl LogcatFilter {
     }
 }
 
-pub fn spawn_logcat_reader(
-    adb_path: &Path,
-    device: &str,
-    tx: Sender<String>,
-) -> Result<Child> {
+pub fn spawn_logcat_reader(adb_path: &Path, device: &str, tx: Sender<String>) -> Result<Child> {
     let mut child = Command::new(adb_path)
         .args(["-s", device, "logcat", "-v", "threadtime"])
         .stdout(Stdio::piped())
@@ -223,6 +261,17 @@ pub fn clear_buffer(adb: &AdbClient, device: &str) -> Result<()> {
     Ok(())
 }
 
+/// True if any exclude substring matches the log line (tag + message + raw).
+pub fn matches_any_exclude(excludes: &[String], entry: &LogEntry) -> bool {
+    if excludes.is_empty() {
+        return false;
+    }
+    let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
+    excludes
+        .iter()
+        .any(|e| !e.is_empty() && hay.contains(&e.to_lowercase()))
+}
+
 pub fn looks_like_stack_trace(line: &str) -> bool {
     line.trim_start().starts_with("at ")
         || line.contains("Exception")
@@ -242,5 +291,20 @@ mod tests {
         assert_eq!(e.pid, "2359");
         assert_eq!(e.tag, "MyTag");
         assert_eq!(e.message, "hello world");
+    }
+
+    #[test]
+    fn exclude_substrings_drop_matching_lines() {
+        let f = LogcatFilter {
+            filter_by_application_ids: false,
+            tag_substrings: vec![],
+            levels: None,
+            content: None,
+            exclude_substrings: vec!["chatty".to_string()],
+        };
+        let e = parse_log_line("02-03 15:44:41.704  2359  3654 I chatty: blah").expect("parse");
+        assert!(!f.allows(&e, &[]));
+        let ok = parse_log_line("02-03 15:44:41.704  2359  3654 I MyTag: hello").expect("parse");
+        assert!(f.allows(&ok, &[]));
     }
 }

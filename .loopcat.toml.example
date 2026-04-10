@@ -11,13 +11,16 @@ variant = "debug"
 
 # Optional — inferred as assemble<Flavor>Debug / install<Flavor>Debug when possible
 # assemble_task = "assembleDevDebug"
-# install_task = "installDevDebug"
+# install_task  = "installDevDebug"
 
 # Optional: comma-separated levels in log_level for filtering (see modules/logcat.rs)
 log_level = "D,I,W,E,V"
 
 # Tag substrings — line must match at least one if non-empty
 log_filters = ["OkHttp"]
+
+# Lines containing any of these substrings are dropped (noisy tags, etc.)
+exclude_filters = ["chatty", "ViewRootImpl"]
 
 # Extra arguments passed to `scrcpy`
 scrcpy_args = ["--window-title", "DroidLoop"]

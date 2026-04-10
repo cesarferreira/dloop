@@ -8,6 +8,8 @@ pub enum Action {
     ToggleLogcat,
     FocusFilter,
     ClearFilter,
+    FocusExclude,
+    ClearExclude,
     ClearLogs,
     ToggleLogcatPause,
     TogglePackageFilter,
@@ -16,6 +18,8 @@ pub enum Action {
     ScrollPageUp,
     ScrollPageDown,
     ScrollTail,
+    ExportLogs,
+    YankLastCrash,
     // Build
     BuildDebug,
     InstallDebug,
@@ -25,6 +29,7 @@ pub enum Action {
     OpenDevicePicker,
     OpenBuildPopup,
     OpenPackagePicker,
+    OpenBuildHistory,
     // Shared popup navigation
     PickerNext,
     PickerPrev,
@@ -33,6 +38,5 @@ pub enum Action {
     // Misc
     LaunchScrcpy,
     StopProcess,
-    ConfirmYes,
     ConfirmNo,
 }

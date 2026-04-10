@@ -19,7 +19,8 @@ pub fn launch_scrcpy(serial: &str, extra_args: &[String]) -> Result<()> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().map_err(|e| anyhow!("failed to spawn scrcpy: {e}"))?;
+    cmd.spawn()
+        .map_err(|e| anyhow!("failed to spawn scrcpy: {e}"))?;
     Ok(())
 }
 

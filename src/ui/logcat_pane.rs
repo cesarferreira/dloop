@@ -21,7 +21,9 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     let running = app.logcat_running;
     let scrolled = app.log_scroll > 0;
 
-    let title = if app.filter_focused {
+    let title = if app.exclude_focused {
+        " Logcat  [EXCLUDE] "
+    } else if app.filter_focused {
         " Logcat  [FILTER] "
     } else if paused {
         " Logcat  PAUSED "
@@ -31,7 +33,9 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         " Logcat "
     };
 
-    let border_style = Style::default().fg(if app.filter_focused {
+    let border_style = Style::default().fg(if app.exclude_focused {
+        Color::Rgb(255, 150, 100)
+    } else if app.filter_focused {
         Color::Cyan
     } else {
         Color::Rgb(50, 50, 70)
@@ -44,14 +48,16 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // ── filter bar (only when active) ────────────────────────────────────
-    let filter_line: Option<Line> = if app.filter_focused || !app.filter_input.is_empty() {
-        Some(if app.filter_focused {
+    let mut header_lines: Vec<Line> = Vec::new();
+    if app.filter_focused || !app.filter_input.is_empty() {
+        header_lines.push(if app.filter_focused {
             Line::from(vec![
                 Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     &app.filter_input,
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("█", Style::default().fg(Color::Cyan)),
             ])
@@ -60,20 +66,34 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
                 Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(&app.filter_input, Style::default().fg(Color::Cyan)),
             ])
-        })
-    } else {
-        None
-    };
+        });
+    }
+    if app.exclude_focused || !app.exclude_input.is_empty() {
+        header_lines.push(if app.exclude_focused {
+            Line::from(vec![
+                Span::styled(" exclude: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    &app.exclude_input,
+                    Style::default()
+                        .fg(Color::Rgb(255, 150, 100))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("█", Style::default().fg(Color::Rgb(255, 150, 100))),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(" exclude: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    &app.exclude_input,
+                    Style::default().fg(Color::Rgb(255, 150, 100)),
+                ),
+            ])
+        });
+    }
 
-    let header_h = filter_line.is_some() as u16;
+    let header_h = header_lines.len() as u16;
     let visible_rows = inner.height.saturating_sub(header_h).max(1) as usize;
     let msg_width = (inner.width as usize).saturating_sub(PREFIX_WIDTH).max(20);
-
-    let filter_lower = if app.filter_input.is_empty() {
-        None
-    } else {
-        Some(app.filter_input.to_lowercase())
-    };
 
     let total = app.log_lines.len();
     let scroll = app.log_scroll.min(total.saturating_sub(visible_rows));
@@ -86,14 +106,9 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         if collected.len() >= visible_rows * 3 {
             break;
         }
-        // Apply text filter to existing lines
-        if let Some(ref needle) = filter_lower {
-            let hay = format!("{} {} {}", entry.tag, entry.level, entry.message).to_lowercase();
-            if !hay.contains(needle.as_str()) {
-                continue;
-            }
+        if !app.pane_shows_entry(entry) {
+            continue;
         }
-        // Handle scroll: skip the first `scroll` matching entries from the bottom
         if skipped < scroll {
             skipped += 1;
             continue;
@@ -101,23 +116,35 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         let lc = &entry.level;
         let lvl_color = level_style(lc);
         let tc = tag_color(&entry.tag, &mut app.tag_color_cache);
-        let is_stack =
-            looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
-        let msg_fg = lvl_color;
-        let msg_modifier = if is_stack || matches!(lc.as_str(), "E" | "F") {
+        let is_stack = looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
+        let crash_bg = entry.crash_start;
+        let msg_fg = if crash_bg {
+            Color::Rgb(255, 200, 200)
+        } else {
+            lvl_color
+        };
+        let msg_modifier = if crash_bg || is_stack || matches!(lc.as_str(), "E" | "F") {
             Modifier::BOLD
         } else {
             Modifier::empty()
         };
-        let lvl_style_span = match lc.as_str() {
-            "E" | "F" => {
-                Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
-            }
-            "W" => Style::default()
+        let lvl_style_span = if crash_bg {
+            Style::default()
                 .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-            _ => Style::default().fg(lvl_color).add_modifier(Modifier::BOLD),
+                .bg(Color::Rgb(120, 0, 0))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            match lc.as_str() {
+                "E" | "F" => Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+                "W" => Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+                _ => Style::default().fg(lvl_color).add_modifier(Modifier::BOLD),
+            }
         };
 
         let chunks = word_wrap(&entry.message, msg_width);
@@ -130,27 +157,58 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
                 } else {
                     " ".repeat(TAG_WIDTH)
                 };
-                let tag_style = if show_tag {
+                let tag_style = if crash_bg {
+                    Style::default()
+                        .fg(Color::Rgb(255, 180, 180))
+                        .bg(Color::Rgb(80, 0, 0))
+                } else if show_tag {
                     Style::default().fg(tc)
                 } else {
                     Style::default().fg(Color::Rgb(40, 40, 55))
                 };
+                let ts_style = if crash_bg {
+                    Style::default()
+                        .fg(Color::Rgb(255, 200, 200))
+                        .bg(Color::Rgb(80, 0, 0))
+                } else {
+                    Style::default().fg(Color::Rgb(80, 80, 100))
+                };
                 collected.push(Line::from(vec![
                     Span::styled(
                         format!("{:<width$} ", entry.timestamp, width = TS_WIDTH),
-                        Style::default().fg(Color::Rgb(80, 80, 100)),
+                        ts_style,
                     ),
                     Span::styled(tag_display, tag_style),
                     Span::raw(" "),
                     Span::styled(format!(" {} ", lc), lvl_style_span),
                     Span::raw(" "),
-                    Span::styled(chunk, Style::default().fg(msg_fg).add_modifier(msg_modifier)),
+                    Span::styled(
+                        chunk,
+                        Style::default()
+                            .fg(msg_fg)
+                            .bg(if crash_bg {
+                                Color::Rgb(80, 0, 0)
+                            } else {
+                                Color::Reset
+                            })
+                            .add_modifier(msg_modifier),
+                    ),
                 ]));
             } else {
                 let blank = " ".repeat(PREFIX_WIDTH);
                 collected.push(Line::from(vec![
                     Span::raw(blank),
-                    Span::styled(chunk, Style::default().fg(msg_fg).add_modifier(msg_modifier)),
+                    Span::styled(
+                        chunk,
+                        Style::default()
+                            .fg(msg_fg)
+                            .bg(if crash_bg {
+                                Color::Rgb(80, 0, 0)
+                            } else {
+                                Color::Reset
+                            })
+                            .add_modifier(msg_modifier),
+                    ),
                 ]));
             }
         }
@@ -161,9 +219,7 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     let start = collected.len().saturating_sub(visible_rows);
 
     let mut lines: Vec<Line> = Vec::new();
-    if let Some(fl) = filter_line {
-        lines.push(fl);
-    }
+    lines.extend(header_lines);
 
     if total == 0 {
         lines.push(Line::from(Span::styled(

@@ -8,8 +8,12 @@ use ratatui::Frame;
 use crate::app::App;
 
 pub fn render_popup(f: &mut Frame<'_>, app: &App, area: Rect) {
-    let popup_h = (area.height * 2 / 3).max(10).min(area.height.saturating_sub(4));
-    let popup_w = (area.width * 4 / 5).max(60).min(area.width.saturating_sub(4));
+    let popup_h = (area.height * 2 / 3)
+        .max(10)
+        .min(area.height.saturating_sub(4));
+    let popup_w = (area.width * 4 / 5)
+        .max(60)
+        .min(area.width.saturating_sub(4));
     let popup = centered(popup_w, popup_h, area);
 
     f.render_widget(Clear, popup);
@@ -17,9 +21,20 @@ pub fn render_popup(f: &mut Frame<'_>, app: &App, area: Rect) {
     let (status_text, status_color) = if let Some(ref t) = app.build_task {
         (format!("▶ {t}"), Color::Yellow)
     } else if let Some(last) = app.build_history.last() {
-        let icon = if last.exit_code == Some(0) { "✓" } else { "✗" };
-        let col = if last.exit_code == Some(0) { Color::Green } else { Color::Red };
-        (format!("{icon} {} ({:.1}s)", last.task, last.duration.as_secs_f64()), col)
+        let icon = if last.exit_code == Some(0) {
+            "✓"
+        } else {
+            "✗"
+        };
+        let col = if last.exit_code == Some(0) {
+            Color::Green
+        } else {
+            Color::Red
+        };
+        (
+            format!("{icon} {} ({:.1}s)", last.task, last.duration.as_secs_f64()),
+            col,
+        )
     } else {
         ("No build yet".to_string(), Color::DarkGray)
     };
@@ -34,7 +49,12 @@ pub fn render_popup(f: &mut Frame<'_>, app: &App, area: Rect) {
         format!(" Build  {status_text}  ↑↓ scroll  Esc close ")
     };
     let block = Block::default()
-        .title(Span::styled(title, Style::default().fg(status_color).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(popup);
@@ -63,7 +83,11 @@ pub fn render_popup(f: &mut Frame<'_>, app: &App, area: Rect) {
             let text = raw
                 .trim_start_matches("[stdout] ")
                 .trim_start_matches("[stderr] ");
-            let fg = if raw.contains("[stderr]") { Color::LightRed } else { Color::Gray };
+            let fg = if raw.contains("[stderr]") {
+                Color::LightRed
+            } else {
+                Color::Gray
+            };
             let display: String = text.chars().take(w).collect();
             Line::from(Span::styled(display, Style::default().fg(fg)))
         })

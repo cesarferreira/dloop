@@ -51,10 +51,11 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
             let serial: String = d.serial.chars().take(16).collect();
             ListItem::new(Line::from(vec![Span::styled(
                 format!("{prefix}{} [{serial}]", d.model),
-                Style::default()
-                    .fg(fg)
-                    .bg(bg)
-                    .add_modifier(if sel { Modifier::BOLD } else { Modifier::empty() }),
+                Style::default().fg(fg).bg(bg).add_modifier(if sel {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
             )]))
         })
         .collect();

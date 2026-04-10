@@ -1,7 +1,8 @@
 //! Application state and main run loop.
 use anyhow::Result;
 use std::collections::HashMap;
-use std::io::Stdout;
+use std::fs;
+use std::io::{Stdout, Write};
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::mpsc;
@@ -13,13 +14,13 @@ use ratatui::Terminal;
 use crate::action::Action;
 use crate::adb::{AdbClient, Device};
 use crate::event::{poll_event, AppEvent, Modal};
+use crate::modules::build::{find_gradlew, spawn_gradle};
 use crate::modules::config::save_global_config;
 use crate::modules::config::MergedConfig;
 use crate::modules::device::scan_devices;
-use crate::modules::build::{find_gradlew, spawn_gradle};
 use crate::modules::logcat::{
-    clear_buffer, parse_log_line, refresh_pids_for_packages, spawn_logcat_reader, LogEntry,
-    LogcatFilter,
+    clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude, parse_log_line,
+    refresh_pids_for_packages, spawn_logcat_reader, CrashEvent, LogEntry, LogcatFilter,
 };
 use crate::modules::mirror::launch_scrcpy;
 use crate::modules::project::{infer_project, ProjectInference};
@@ -56,7 +57,11 @@ fn build_variant_list(
             ));
         }
         // add plain debug/release too
-        variants.push(("Debug".to_string(), "assembleDebug".to_string(), "installDebug".to_string()));
+        variants.push((
+            "Debug".to_string(),
+            "assembleDebug".to_string(),
+            "installDebug".to_string(),
+        ));
         return variants;
     }
 
@@ -156,8 +161,20 @@ pub struct App {
     pub max_log_lines: usize,
     pub filter_input: String,
     pub filter_focused: bool,
+    pub exclude_input: String,
+    pub exclude_focused: bool,
     pub tag_color_cache: HashMap<String, usize>,
     pub package_pids: Vec<String>,
+
+    pub crash_events: Vec<CrashEvent>,
+    pub current_crash: Option<CrashEvent>,
+
+    pub device_props: HashMap<String, String>,
+    pub device_battery: Option<u8>,
+    pub last_device_info_refresh: Instant,
+
+    pub build_history_open: bool,
+    pub build_history_scroll: usize,
 
     pub build_child: Option<Child>,
     pub build_task: Option<String>,
@@ -201,12 +218,48 @@ pub struct App {
 impl App {
     /// Which modal is currently active (for event routing).
     pub fn active_modal(&self) -> Modal {
-        if self.filter_focused { return Modal::Filter; }
-        if self.picker_open { return Modal::VariantPicker; }
-        if self.device_picker_open { return Modal::DevicePicker; }
-        if self.build_popup_open { return Modal::BuildPopup; }
-        if self.package_picker_open { return Modal::PackagePicker; }
+        if self.filter_focused {
+            return Modal::Filter;
+        }
+        if self.exclude_focused {
+            return Modal::ExcludeFilter;
+        }
+        if self.picker_open {
+            return Modal::VariantPicker;
+        }
+        if self.device_picker_open {
+            return Modal::DevicePicker;
+        }
+        if self.build_popup_open {
+            return Modal::BuildPopup;
+        }
+        if self.package_picker_open {
+            return Modal::PackagePicker;
+        }
+        if self.build_history_open {
+            return Modal::BuildHistory;
+        }
         Modal::None
+    }
+
+    /// Config + runtime exclude substrings (for pane display consistency).
+    pub fn merged_exclude_substrings(&self) -> Vec<String> {
+        let mut v = self.config.project.exclude_filters.clone();
+        if !self.exclude_input.is_empty() {
+            v.push(self.exclude_input.clone());
+        }
+        v
+    }
+
+    /// Whether the log pane should show this line (content + exclude), independent of ingest filter.
+    pub fn pane_shows_entry(&self, entry: &LogEntry) -> bool {
+        if !self.filter_input.is_empty() {
+            let hay = format!("{} {} {}", entry.tag, entry.level, entry.message).to_lowercase();
+            if !hay.contains(&self.filter_input.to_lowercase()) {
+                return false;
+            }
+        }
+        !matches_any_exclude(&self.merged_exclude_substrings(), entry)
     }
 
     /// Filtered package list used for the package picker display.
@@ -253,7 +306,8 @@ impl App {
             .or(inference.install_task.clone())
             .unwrap_or_else(|| "installDebug".to_string());
 
-        let picker_variants = build_variant_list(&inference, &effective_assemble, &effective_install);
+        let picker_variants =
+            build_variant_list(&inference, &effective_assemble, &effective_install);
 
         let (tx_log, rx_log) = mpsc::channel();
         let (tx_build, rx_build) = mpsc::channel();
@@ -280,8 +334,17 @@ impl App {
             max_log_lines: 10_000,
             filter_input: String::new(),
             filter_focused: false,
+            exclude_input: String::new(),
+            exclude_focused: false,
             tag_color_cache: HashMap::new(),
             package_pids: Vec::new(),
+            crash_events: Vec::new(),
+            current_crash: None,
+            device_props: HashMap::new(),
+            device_battery: None,
+            last_device_info_refresh: Instant::now() - Duration::from_secs(60),
+            build_history_open: false,
+            build_history_scroll: 0,
             build_child: None,
             build_task: None,
             build_start: None,
@@ -307,6 +370,7 @@ impl App {
             picker_variants,
         };
         app.refresh_devices()?;
+        app.refresh_device_info();
         if let Some(ref serial) = app.config.global.preferred_device_serial {
             if let Some(idx) = app.devices.iter().position(|d| &d.serial == serial) {
                 app.selected_device = idx;
@@ -320,7 +384,9 @@ impl App {
     }
 
     pub fn selected_serial(&self) -> Option<&str> {
-        self.devices.get(self.selected_device).map(|d| d.serial.as_str())
+        self.devices
+            .get(self.selected_device)
+            .map(|d| d.serial.as_str())
     }
 
     pub fn refresh_devices(&mut self) -> Result<()> {
@@ -339,6 +405,7 @@ impl App {
             self.selected_device = self.devices.len() - 1;
         }
         self.last_device_refresh = Instant::now();
+        self.refresh_device_info();
         // Auto-start logcat when a device becomes available and it isn't running yet.
         if !self.devices.is_empty() && !self.logcat_running {
             let _ = self.start_logcat();
@@ -346,8 +413,109 @@ impl App {
         Ok(())
     }
 
+    fn refresh_device_info(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.device_props.clear();
+            self.device_battery = None;
+            return;
+        };
+        self.device_props = self
+            .adb
+            .get_device_props(serial.as_str())
+            .unwrap_or_default();
+        self.device_battery = self.adb.get_battery_level(serial.as_str()).ok().flatten();
+        self.last_device_info_refresh = Instant::now();
+    }
+
+    fn tick_device_info_refresh(&mut self) {
+        if self.last_device_info_refresh.elapsed() < Duration::from_secs(30) {
+            return;
+        }
+        self.refresh_device_info();
+    }
+
+    fn finalize_crash(&mut self) {
+        if let Some(c) = self.current_crash.take() {
+            if !c.lines.is_empty() {
+                const MAX_CRASH_EVENTS: usize = 100;
+                if self.crash_events.len() >= MAX_CRASH_EVENTS {
+                    let drop = self.crash_events.len() - MAX_CRASH_EVENTS + 1;
+                    self.crash_events.drain(0..drop);
+                }
+                self.crash_events.push(c);
+            }
+        }
+    }
+
+    fn apply_crash_fsm(&mut self, entry: &mut LogEntry) {
+        if self
+            .current_crash
+            .as_ref()
+            .map(|c| c.lines.len())
+            .unwrap_or(0)
+            >= 50
+        {
+            self.finalize_crash();
+        }
+        if let Some(ref mut crash) = self.current_crash {
+            if crash.lines.len() < 50 && is_crash_continuation(entry) {
+                crash.lines.push(entry.clone());
+                return;
+            }
+            self.finalize_crash();
+            if is_crash_start(entry) {
+                entry.crash_start = true;
+                self.current_crash = Some(CrashEvent {
+                    timestamp: entry.timestamp.clone(),
+                    summary: entry.message.clone(),
+                    lines: vec![entry.clone()],
+                });
+            }
+        } else if is_crash_start(entry) {
+            entry.crash_start = true;
+            self.current_crash = Some(CrashEvent {
+                timestamp: entry.timestamp.clone(),
+                summary: entry.message.clone(),
+                lines: vec![entry.clone()],
+            });
+        }
+    }
+
     fn show_toast(&mut self, msg: impl Into<String>) {
         self.toast = Some((msg.into(), Instant::now()));
+    }
+
+    fn export_logs_to_file(&mut self) -> std::io::Result<()> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = self.project_root.join(format!("dloop-{ts}.log"));
+        let mut f = fs::File::create(&path)?;
+        let mut n = 0usize;
+        for entry in &self.log_lines {
+            if !self.pane_shows_entry(entry) {
+                continue;
+            }
+            writeln!(f, "{}", entry.raw)?;
+            n += 1;
+        }
+        self.show_toast(format!("Exported {n} lines to {}", path.display()));
+        Ok(())
+    }
+
+    fn yank_last_crash(&mut self) -> Result<(), String> {
+        let Some(crash) = self.crash_events.last() else {
+            return Err("no crash captured yet".to_string());
+        };
+        let mut text = format!("--- {} @ {} ---\n", crash.summary, crash.timestamp);
+        for line in &crash.lines {
+            text.push_str(&line.raw);
+            text.push('\n');
+        }
+        copy_to_clipboard(&text).map_err(|e| e.to_string())?;
+        self.show_toast(format!("Copied crash ({} lines)", crash.lines.len()));
+        Ok(())
     }
 
     fn drain_channels(&mut self) {
@@ -356,16 +524,18 @@ impl App {
             if self.logcat_paused {
                 continue;
             }
-            if let Some(entry) = parse_log_line(&line) {
+            if let Some(mut entry) = parse_log_line(&line) {
                 let filter = self.current_log_filter();
-                if filter.allows(&entry, &self.package_pids) {
-                    if self.log_lines.len() >= self.max_log_lines {
-                        let drop = self.log_lines.len() - self.max_log_lines + 1;
-                        self.log_lines.drain(0..drop);
-                    }
-                    self.log_lines.push(entry);
-                    got_new = true;
+                if !filter.allows(&entry, &self.package_pids) {
+                    continue;
                 }
+                self.apply_crash_fsm(&mut entry);
+                if self.log_lines.len() >= self.max_log_lines {
+                    let drop = self.log_lines.len() - self.max_log_lines + 1;
+                    self.log_lines.drain(0..drop);
+                }
+                self.log_lines.push(entry);
+                got_new = true;
             } else if (line.starts_with("[adb logcat stderr]") || line.starts_with("[adb"))
                 && self.log_lines.len() < self.max_log_lines
             {
@@ -376,6 +546,7 @@ impl App {
                     tag: "adb".into(),
                     level: "E".into(),
                     message: line,
+                    crash_start: false,
                 });
                 got_new = true;
             }
@@ -410,12 +581,16 @@ impl App {
         // show_all_logs=true → no PID filter; active_package_filter overrides effective_packages.
         let filter_by_pkg = !self.show_all_logs
             && (self.active_package_filter.is_some() || !self.effective_packages.is_empty());
+        let mut exclude_substrings = self.config.project.exclude_filters.clone();
+        if !self.exclude_input.is_empty() {
+            exclude_substrings.push(self.exclude_input.clone());
+        }
         LogcatFilter {
             filter_by_application_ids: filter_by_pkg,
             tag_substrings: self.config.project.log_filters.clone(),
             levels: level,
             content,
-            exclude: None,
+            exclude_substrings,
         }
     }
 
@@ -625,17 +800,42 @@ impl App {
             }
             Action::FocusFilter => {
                 self.filter_focused = !self.filter_focused;
+                if self.filter_focused {
+                    self.exclude_focused = false;
+                }
             }
             Action::ClearFilter => {
                 self.filter_input.clear();
                 self.filter_focused = false;
             }
+            Action::FocusExclude => {
+                self.exclude_focused = !self.exclude_focused;
+                if self.exclude_focused {
+                    self.filter_focused = false;
+                }
+            }
+            Action::ClearExclude => {
+                self.exclude_input.clear();
+                self.exclude_focused = false;
+            }
+            Action::ExportLogs => {
+                if let Err(e) = self.export_logs_to_file() {
+                    self.show_toast(format!("export: {e}"));
+                }
+            }
+            Action::YankLastCrash => {
+                if let Err(e) = self.yank_last_crash() {
+                    self.show_toast(format!("yank: {e}"));
+                }
+            }
             Action::ConfirmNo => {
                 self.filter_focused = false;
+                self.exclude_focused = false;
                 self.picker_open = false;
                 self.device_picker_open = false;
                 self.build_popup_open = false;
                 self.package_picker_open = false;
+                self.build_history_open = false;
                 self.package_picker_input.clear();
             }
             Action::ClearLogs => self.clear_logs(),
@@ -644,11 +844,17 @@ impl App {
             }
             Action::TogglePackageFilter => {
                 self.show_all_logs = !self.show_all_logs;
-                let mode = if self.show_all_logs { "all logs" } else { "package filter" };
+                let mode = if self.show_all_logs {
+                    "all logs"
+                } else {
+                    "package filter"
+                };
                 self.show_toast(format!("Logcat: {mode}"));
             }
             Action::ScrollUp => {
-                if self.build_popup_open {
+                if self.build_history_open {
+                    self.build_history_scroll = self.build_history_scroll.saturating_sub(1);
+                } else if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_add(1);
                     self.build_popup_auto_close = None;
                 } else {
@@ -656,7 +862,10 @@ impl App {
                 }
             }
             Action::ScrollDown => {
-                if self.build_popup_open {
+                if self.build_history_open {
+                    let max = self.build_history.len().saturating_sub(1);
+                    self.build_history_scroll = (self.build_history_scroll + 1).min(max);
+                } else if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_sub(1);
                     self.build_popup_auto_close = None;
                 } else {
@@ -664,10 +873,19 @@ impl App {
                 }
             }
             Action::ScrollPageUp => {
-                self.log_scroll = self.log_scroll.saturating_add(20);
+                if self.build_history_open {
+                    self.build_history_scroll = self.build_history_scroll.saturating_sub(10);
+                } else {
+                    self.log_scroll = self.log_scroll.saturating_add(20);
+                }
             }
             Action::ScrollPageDown => {
-                self.log_scroll = self.log_scroll.saturating_sub(20);
+                if self.build_history_open {
+                    let max = self.build_history.len().saturating_sub(1);
+                    self.build_history_scroll = (self.build_history_scroll + 10).min(max);
+                } else {
+                    self.log_scroll = self.log_scroll.saturating_sub(20);
+                }
             }
             Action::ScrollTail => {
                 self.log_scroll = 0;
@@ -688,6 +906,10 @@ impl App {
                 self.build_popup_scroll = 0;
                 self.build_popup_auto_close = None;
             }
+            Action::OpenBuildHistory => {
+                self.build_history_open = !self.build_history_open;
+                self.build_history_scroll = 0;
+            }
             Action::OpenPackagePicker => {
                 self.package_picker_open = true;
                 self.package_picker_input.clear();
@@ -695,7 +917,10 @@ impl App {
             }
             // ── shared picker navigation ──────────────────────────────────
             Action::PickerNext => {
-                if self.device_picker_open {
+                if self.build_history_open {
+                    let max = self.build_history.len().saturating_sub(1);
+                    self.build_history_scroll = (self.build_history_scroll + 1).min(max);
+                } else if self.device_picker_open {
                     if !self.devices.is_empty() {
                         self.device_picker_cursor =
                             (self.device_picker_cursor + 1) % self.devices.len();
@@ -708,7 +933,9 @@ impl App {
                 }
             }
             Action::PickerPrev => {
-                if self.device_picker_open {
+                if self.build_history_open {
+                    self.build_history_scroll = self.build_history_scroll.saturating_sub(1);
+                } else if self.device_picker_open {
                     if !self.devices.is_empty() {
                         self.device_picker_cursor = if self.device_picker_cursor == 0 {
                             self.devices.len() - 1
@@ -735,6 +962,7 @@ impl App {
                 if self.device_picker_open {
                     self.selected_device = self.device_picker_cursor;
                     self.persist_preferred_device();
+                    self.refresh_device_info();
                     if self.logcat_running {
                         self.stop_logcat();
                         let _ = self.start_logcat();
@@ -750,11 +978,12 @@ impl App {
                         let idx = self.package_picker_cursor - 1;
                         if let Some(pkg) = filtered.get(idx).cloned() {
                             // If user typed something not in list, use the typed text
-                            let chosen = if filtered.is_empty() && !self.package_picker_input.is_empty() {
-                                self.package_picker_input.clone()
-                            } else {
-                                pkg
-                            };
+                            let chosen =
+                                if filtered.is_empty() && !self.package_picker_input.is_empty() {
+                                    self.package_picker_input.clone()
+                                } else {
+                                    pkg
+                                };
                             self.active_package_filter = Some(chosen.clone());
                             self.show_all_logs = false;
                             self.show_toast(format!("Filtering: {chosen}"));
@@ -768,7 +997,9 @@ impl App {
                         let _ = self.start_logcat();
                     }
                 } else if self.picker_open {
-                    if let Some((label, a, i)) = self.picker_variants.get(self.picker_cursor).cloned() {
+                    if let Some((label, a, i)) =
+                        self.picker_variants.get(self.picker_cursor).cloned()
+                    {
                         self.effective_assemble = a;
                         self.effective_install = i;
                         self.show_toast(format!("Variant: {label}"));
@@ -781,6 +1012,7 @@ impl App {
                 self.device_picker_open = false;
                 self.build_popup_open = false;
                 self.package_picker_open = false;
+                self.build_history_open = false;
                 self.package_picker_input.clear();
             }
             Action::BuildDebug => {
@@ -822,7 +1054,6 @@ impl App {
                     self.show_toast("Launched scrcpy");
                 }
             }
-            Action::ConfirmYes => {}
         }
         Ok(false)
     }
@@ -850,15 +1081,13 @@ impl App {
     }
 }
 
-pub fn run_app(
-    mut terminal: Terminal<CrosstermBackend<Stdout>>,
-    mut app: App,
-) -> Result<()> {
+pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> Result<()> {
     let tick = Duration::from_millis(50);
     loop {
         app.drain_channels();
         app.poll_build_finished();
         app.tick_pid_refresh();
+        app.tick_device_info_refresh();
 
         if let Some((_, t)) = &app.toast {
             if t.elapsed() > Duration::from_secs(4) {
@@ -882,6 +1111,8 @@ pub fn run_app(
                     if app.package_picker_open {
                         app.package_picker_input.push(ch);
                         app.package_picker_cursor = 0;
+                    } else if app.exclude_focused {
+                        app.exclude_input.push(ch);
                     } else {
                         app.filter_input.push(ch);
                     }
@@ -890,6 +1121,8 @@ pub fn run_app(
                     if app.package_picker_open {
                         app.package_picker_input.pop();
                         app.package_picker_cursor = 0;
+                    } else if app.exclude_focused {
+                        app.exclude_input.pop();
                     } else {
                         app.filter_input.pop();
                     }
@@ -902,6 +1135,7 @@ pub fn run_app(
             }
         }
     }
+    app.finalize_crash();
     app.stop_logcat();
     app.stop_build();
     restore_terminal()?;
@@ -913,15 +1147,21 @@ pub fn run_app(
 /// Recursively scan `dir` for `output-metadata.json` files and collect
 /// (modified_time, applicationId) pairs.  Updates `best` with the most recent.
 fn collect_apk_metadata(dir: &std::path::Path, best: &mut Option<(std::time::SystemTime, String)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             collect_apk_metadata(&path, best);
         } else if path.file_name().and_then(|n| n.to_str()) == Some("output-metadata.json") {
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             let Ok(meta) = path.metadata() else { continue };
-            let Ok(modified) = meta.modified() else { continue };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
 
             // Extract `"applicationId": "com.example.app"` with a simple scan —
             // avoids pulling in serde_json as a direct dependency.
@@ -933,6 +1173,25 @@ fn collect_apk_metadata(dir: &std::path::Path, best: &mut Option<(std::time::Sys
             }
         }
     }
+}
+
+fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .or_else(|_| {
+            Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .spawn()
+        })
+        .or_else(|_| Command::new("wl-copy").stdin(Stdio::piped()).spawn())?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let _ = child.wait();
+    Ok(())
 }
 
 fn extract_application_id_from_metadata(json: &str) -> Option<String> {

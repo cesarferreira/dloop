@@ -1,4 +1,5 @@
 //! Layout: info bar (top) | logcat (full) | status bar (bottom) + popup overlays
+mod build_history_popup;
 mod build_pane;
 mod device_popup;
 mod info_bar;
@@ -45,7 +46,8 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let any_popup = app.picker_open
         || app.device_picker_open
         || app.build_popup_open
-        || app.package_picker_open;
+        || app.package_picker_open
+        || app.build_history_open;
 
     if any_popup {
         dim_overlay(f, area);
@@ -62,6 +64,9 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     }
     if app.package_picker_open {
         package_picker::render(f, app, area);
+    }
+    if app.build_history_open {
+        build_history_popup::render(f, app, area);
     }
 }
 

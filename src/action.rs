@@ -19,7 +19,11 @@ pub enum Action {
     ScrollPageDown,
     ScrollTail,
     ExportLogs,
-    YankLastCrash,
+    OpenCrashDetail,
+    CrashCopy,
+    CrashAgent,
+    CrashExport,
+    CrashSearch,
     // Build
     BuildDebug,
     InstallDebug,

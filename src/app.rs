@@ -112,6 +112,36 @@ fn effective_package_list(config: &MergedConfig, inference: &ProjectInference) -
     }
     inference.application_ids.clone()
 }
+
+fn same_log_entry(a: &LogEntry, b: &LogEntry) -> bool {
+    a.raw == b.raw
+        && a.timestamp == b.timestamp
+        && a.pid == b.pid
+        && a.tag == b.tag
+        && a.level == b.level
+        && a.message == b.message
+}
+
+fn scroll_offset_to_entry<F>(
+    log_lines: &[LogEntry],
+    target: &LogEntry,
+    mut is_visible: F,
+) -> Option<usize>
+where
+    F: FnMut(&LogEntry) -> bool,
+{
+    let mut visible_after = 0usize;
+    for entry in log_lines.iter().rev() {
+        if !is_visible(entry) {
+            continue;
+        }
+        if same_log_entry(entry, target) {
+            return Some(visible_after);
+        }
+        visible_after += 1;
+    }
+    None
+}
 use crate::tui::restore_terminal;
 use crate::ui;
 
@@ -145,6 +175,9 @@ pub struct App {
 
     pub build_popup_open: bool,
     pub build_popup_scroll: usize,
+
+    pub crash_detail_open: bool,
+    pub crash_detail_scroll: usize,
     /// When set, the build popup auto-closes once this instant is reached.
     pub build_popup_auto_close: Option<Instant>,
 
@@ -203,7 +236,7 @@ pub struct App {
 
     /// How many lines from the bottom the logcat viewport is scrolled (0 = follow tail).
     pub log_scroll: usize,
-    /// When true, show ALL logcat lines (no package filter). Default = true.
+    /// When true, show ALL logcat lines (no package filter).
     pub show_all_logs: bool,
     /// When true, launch the app after the current build finishes successfully.
     pub launch_after_build: bool,
@@ -229,6 +262,9 @@ impl App {
         }
         if self.device_picker_open {
             return Modal::DevicePicker;
+        }
+        if self.crash_detail_open {
+            return Modal::CrashDetail;
         }
         if self.build_popup_open {
             return Modal::BuildPopup;
@@ -305,6 +341,7 @@ impl App {
             .clone()
             .or(inference.install_task.clone())
             .unwrap_or_else(|| "installDebug".to_string());
+        let show_all_logs = effective_packages.is_empty();
 
         let picker_variants =
             build_variant_list(&inference, &effective_assemble, &effective_install);
@@ -322,6 +359,8 @@ impl App {
             device_picker_cursor: 0,
             build_popup_open: false,
             build_popup_scroll: 0,
+            crash_detail_open: false,
+            crash_detail_scroll: 0,
             build_popup_auto_close: None,
             package_picker_open: false,
             package_picker_input: String::new(),
@@ -363,7 +402,7 @@ impl App {
             effective_assemble,
             effective_install,
             log_scroll: 0,
-            show_all_logs: true,
+            show_all_logs,
             launch_after_build: false,
             picker_open: false,
             picker_cursor: 0,
@@ -504,17 +543,79 @@ impl App {
         Ok(())
     }
 
-    fn yank_last_crash(&mut self) -> Result<(), String> {
-        let Some(crash) = self.crash_events.last() else {
-            return Err("no crash captured yet".to_string());
-        };
+    fn format_crash_text(crash: &CrashEvent) -> String {
         let mut text = format!("--- {} @ {} ---\n", crash.summary, crash.timestamp);
         for line in &crash.lines {
             text.push_str(&line.raw);
             text.push('\n');
         }
+        text
+    }
+
+    fn yank_last_crash(&mut self) -> Result<(), String> {
+        let Some(crash) = self.crash_events.last() else {
+            return Err("no crash captured yet".to_string());
+        };
+        let text = Self::format_crash_text(crash);
         copy_to_clipboard(&text).map_err(|e| e.to_string())?;
-        self.show_toast(format!("Copied crash ({} lines)", crash.lines.len()));
+        self.show_toast(format!(
+            "Copied crash details ({} lines)",
+            crash.lines.len()
+        ));
+        Ok(())
+    }
+
+    fn scroll_log_to_last_crash(&mut self) {
+        let Some(crash_start) = self
+            .crash_events
+            .last()
+            .and_then(|crash| crash.lines.first())
+        else {
+            return;
+        };
+
+        let scroll = scroll_offset_to_entry(&self.log_lines, crash_start, |entry| {
+            self.pane_shows_entry(entry)
+        });
+        if let Some(scroll) = scroll {
+            self.log_scroll = scroll;
+        }
+    }
+
+    fn open_last_crash_detail(&mut self) {
+        self.scroll_log_to_last_crash();
+        self.crash_detail_open = true;
+        self.crash_detail_scroll = self
+            .crash_events
+            .last()
+            .map(|crash| crash.lines.len())
+            .unwrap_or(0);
+    }
+
+    fn export_crash_to_file(&mut self) -> std::io::Result<()> {
+        let Some(crash) = self.crash_events.last() else {
+            return Err(std::io::Error::other("no crash captured yet"));
+        };
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = self.project_root.join(format!("crash-{ts}.log"));
+        let content = Self::format_crash_text(crash);
+        fs::write(&path, content)?;
+        self.show_toast(format!("Saved crash to {}", path.display()));
+        Ok(())
+    }
+
+    fn search_crash_online(&mut self) -> std::io::Result<()> {
+        let Some(crash) = self.crash_events.last() else {
+            return Err(std::io::Error::other("no crash captured yet"));
+        };
+        let q = format!("{} {}", crash.summary, crash.timestamp);
+        let encoded = url_encode_query(&q);
+        let url = format!("https://www.google.com/search?q={encoded}");
+        open_url(&url)?;
+        self.show_toast("Opened search in browser");
         Ok(())
     }
 
@@ -823,9 +924,42 @@ impl App {
                     self.show_toast(format!("export: {e}"));
                 }
             }
-            Action::YankLastCrash => {
+            Action::OpenCrashDetail => {
+                if self.crash_events.is_empty() {
+                    self.show_toast("no crash captured yet");
+                } else {
+                    self.open_last_crash_detail();
+                }
+            }
+            Action::CrashCopy => {
                 if let Err(e) = self.yank_last_crash() {
                     self.show_toast(format!("yank: {e}"));
+                } else {
+                    self.crash_detail_open = false;
+                }
+            }
+            Action::CrashAgent => {
+                let Some(crash) = self.crash_events.last() else {
+                    self.show_toast("no crash captured yet");
+                    return Ok(false);
+                };
+                let body = Self::format_crash_text(crash);
+                let prompt = format!("Solve this issue. Here are the crash logs:\n\n{body}");
+                if let Err(e) = copy_to_clipboard(&prompt) {
+                    self.show_toast(format!("copy: {e}"));
+                } else {
+                    self.show_toast("Agent prompt copied — paste into your AI assistant");
+                    self.crash_detail_open = false;
+                }
+            }
+            Action::CrashExport => {
+                if let Err(e) = self.export_crash_to_file() {
+                    self.show_toast(format!("export: {e}"));
+                }
+            }
+            Action::CrashSearch => {
+                if let Err(e) = self.search_crash_online() {
+                    self.show_toast(format!("search: {e}"));
                 }
             }
             Action::ConfirmNo => {
@@ -833,6 +967,7 @@ impl App {
                 self.exclude_focused = false;
                 self.picker_open = false;
                 self.device_picker_open = false;
+                self.crash_detail_open = false;
                 self.build_popup_open = false;
                 self.package_picker_open = false;
                 self.build_history_open = false;
@@ -854,6 +989,8 @@ impl App {
             Action::ScrollUp => {
                 if self.build_history_open {
                     self.build_history_scroll = self.build_history_scroll.saturating_sub(1);
+                } else if self.crash_detail_open {
+                    self.crash_detail_scroll = self.crash_detail_scroll.saturating_add(1);
                 } else if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_add(1);
                     self.build_popup_auto_close = None;
@@ -865,6 +1002,8 @@ impl App {
                 if self.build_history_open {
                     let max = self.build_history.len().saturating_sub(1);
                     self.build_history_scroll = (self.build_history_scroll + 1).min(max);
+                } else if self.crash_detail_open {
+                    self.crash_detail_scroll = self.crash_detail_scroll.saturating_sub(1);
                 } else if self.build_popup_open {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_sub(1);
                     self.build_popup_auto_close = None;
@@ -875,6 +1014,8 @@ impl App {
             Action::ScrollPageUp => {
                 if self.build_history_open {
                     self.build_history_scroll = self.build_history_scroll.saturating_sub(10);
+                } else if self.crash_detail_open {
+                    self.crash_detail_scroll = self.crash_detail_scroll.saturating_add(10);
                 } else {
                     self.log_scroll = self.log_scroll.saturating_add(20);
                 }
@@ -883,6 +1024,8 @@ impl App {
                 if self.build_history_open {
                     let max = self.build_history.len().saturating_sub(1);
                     self.build_history_scroll = (self.build_history_scroll + 10).min(max);
+                } else if self.crash_detail_open {
+                    self.crash_detail_scroll = self.crash_detail_scroll.saturating_sub(10);
                 } else {
                     self.log_scroll = self.log_scroll.saturating_sub(20);
                 }
@@ -1010,6 +1153,7 @@ impl App {
             Action::PickerCancel => {
                 self.picker_open = false;
                 self.device_picker_open = false;
+                self.crash_detail_open = false;
                 self.build_popup_open = false;
                 self.package_picker_open = false;
                 self.build_history_open = false;
@@ -1194,6 +1338,31 @@ fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn url_encode_query(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "%{:02X}", b);
+            }
+        }
+    }
+    out
+}
+
+fn open_url(url: &str) -> std::io::Result<()> {
+    use std::process::Command;
+    Command::new("open")
+        .arg(url)
+        .spawn()
+        .or_else(|_| Command::new("xdg-open").arg(url).spawn())?;
+    Ok(())
+}
+
 fn extract_application_id_from_metadata(json: &str) -> Option<String> {
     // The file is small and well-structured; a linear scan is fine.
     let key = "\"applicationId\"";
@@ -1210,4 +1379,52 @@ fn extract_application_id_from_metadata(json: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{scroll_offset_to_entry, LogEntry};
+
+    fn entry(raw: &str) -> LogEntry {
+        LogEntry {
+            raw: raw.to_string(),
+            timestamp: "12:00:00.000".to_string(),
+            pid: "1234".to_string(),
+            tag: "AndroidRuntime".to_string(),
+            level: "E".to_string(),
+            message: raw.to_string(),
+            crash_start: false,
+        }
+    }
+
+    #[test]
+    fn scroll_offset_matches_visible_entries_after_target() {
+        let before = entry("before");
+        let crash = entry("FATAL EXCEPTION: main");
+        let after_one = entry("after-one");
+        let after_two = entry("after-two");
+
+        let lines = vec![
+            before.clone(),
+            crash.clone(),
+            after_one.clone(),
+            after_two.clone(),
+        ];
+
+        let scroll = scroll_offset_to_entry(&lines, &crash, |_| true);
+        assert_eq!(scroll, Some(2));
+    }
+
+    #[test]
+    fn scroll_offset_skips_hidden_entries() {
+        let before = entry("before");
+        let crash = entry("FATAL EXCEPTION: main");
+        let hidden = entry("hidden");
+        let after = entry("after");
+
+        let lines = vec![before.clone(), crash.clone(), hidden.clone(), after.clone()];
+
+        let scroll = scroll_offset_to_entry(&lines, &crash, |entry| entry.raw != "hidden");
+        assert_eq!(scroll, Some(1));
+    }
 }

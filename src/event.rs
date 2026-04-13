@@ -22,6 +22,7 @@ pub enum Modal {
     BuildPopup,
     PackagePicker,
     BuildHistory,
+    CrashDetail,
 }
 
 pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<AppEvent>> {
@@ -40,6 +41,7 @@ pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<App
                 Modal::BuildPopup => map_build_popup(key.code),
                 Modal::PackagePicker => map_package_picker(key.code, key.modifiers),
                 Modal::BuildHistory => map_build_history(key.code),
+                Modal::CrashDetail => map_crash_detail(key.code),
                 Modal::None => map_normal(key.code, key.modifiers),
             })
         }
@@ -64,6 +66,22 @@ fn map_build_popup(code: KeyCode) -> Option<AppEvent> {
         KeyCode::Esc | KeyCode::Char('e') | KeyCode::Char('q') => Action::PickerCancel,
         KeyCode::Up | KeyCode::Char('k') => Action::ScrollUp,
         KeyCode::Down | KeyCode::Char('j') => Action::ScrollDown,
+        KeyCode::PageUp => Action::ScrollPageUp,
+        KeyCode::PageDown => Action::ScrollPageDown,
+        _ => return None,
+    };
+    Some(AppEvent::Action(a))
+}
+
+fn map_crash_detail(code: KeyCode) -> Option<AppEvent> {
+    let a = match code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => Action::PickerCancel,
+        KeyCode::Char('c') | KeyCode::Char('C') => Action::CrashCopy,
+        KeyCode::Char('a') | KeyCode::Char('A') => Action::CrashAgent,
+        KeyCode::Char('w') | KeyCode::Char('W') => Action::CrashExport,
+        KeyCode::Char('s') | KeyCode::Char('S') => Action::CrashSearch,
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => Action::ScrollUp,
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => Action::ScrollDown,
         KeyCode::PageUp => Action::ScrollPageUp,
         KeyCode::PageDown => Action::ScrollPageDown,
         _ => return None,
@@ -167,7 +185,7 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         }
         KeyCode::Char('r') => Some(Action::RefreshDevices),
         KeyCode::Char('w') | KeyCode::Char('W') => Some(Action::ExportLogs),
-        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::YankLastCrash),
+        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::OpenCrashDetail),
 
         _ => None,
     };

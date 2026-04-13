@@ -29,7 +29,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 - **Run** — install + auto-launch the app with one keystroke (`n`)
 - **Variant picker** — floating overlay to switch build variant without editing config files
 - **Logcat streaming** — live `adb logcat` with rustycat-style rendering: 23-char tag column, tag repeat suppression, word-wrapped messages
-- **Crash / ANR detection** — crash blocks get a red highlight; count in the info bar; `y` copies the last crash to the clipboard
+- **Crash / ANR detection** — crash blocks get a red highlight; count in the info bar; `y` opens a **crash detail** popup with the full log and shortcuts to copy, paste-ready agent prompt, export to file, or search online
 - **Scrollable log** — scroll back through history with `↑`/`↓` or `j`/`k`, `End` to return to tail
 - **Filter + Exclude** — live text filter (`f`) across tag + message; exclude filter (`x`) and config `exclude_filters` to silence noisy tags
 - **Export** — `w` writes the current filtered log to `dloop-<timestamp>.log` in the project root
@@ -81,7 +81,8 @@ dloop --project /path/to/my/android/app
 dloop init
 ```
 
-dloop opens immediately. If a device is connected, logcat starts automatically.
+dloop opens immediately. If a device is connected, logcat starts automatically and follows the
+project's package(s) by default.
 
 ## Keybindings
 
@@ -98,7 +99,7 @@ dloop opens immediately. If a device is connected, logcat starts automatically.
 | `f` | Open/close **include** filter |
 | `x` | Open/close **exclude** filter |
 | `w` | Export visible log lines to `dloop-<timestamp>.log` |
-| `y` | Copy last crash to clipboard |
+| `y` | Open **crash details** for the last crash, jump the log pane to that crash, then use `c` copy, `a` agent prompt to clipboard, `w` export to `crash-<timestamp>.log`, `s` Google search, `Esc` close |
 | `H` / `h` | Open/close build history overlay |
 | `Space` | Pause / resume log streaming |
 | `↑` / `↓` / `j` / `k` | Scroll logcat |
@@ -113,6 +114,7 @@ dloop opens immediately. If a device is connected, logcat starts automatically.
 
 In filter / exclude mode: type to edit, `Enter` to confirm, `Esc` to clear.
 In pickers: `↑`/`↓` to move, `Enter` to select, `Esc` to cancel.
+In crash detail: `↑`/`↓` / `j`/`k` scroll the crash text; `PageUp`/`PageDown` page scroll; `c` / `a` / `w` / `s` as above; `Esc` or `q` closes.
 
 ## Gradle Inference
 

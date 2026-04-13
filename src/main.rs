@@ -1,4 +1,4 @@
-//! Droid Loop TUI — Android build, install, and log workflows.
+//! ByeDroid TUI — Android build, install, and log workflows.
 mod action;
 mod adb;
 mod app;

@@ -1,14 +1,14 @@
 [package]
-name = "loopcat"
+name = "byedroid"
 version = "0.1.0"
 edition = "2021"
-description = "Droid Loop TUI — Android build, install, and log workflows in the terminal"
+description = "ByeDroid TUI — Android build, install, and log workflows in the terminal"
 license = "MIT"
-repository = "https://github.com/cesarferreira/loopcat"
+repository = "https://github.com/cesarferreira/byedroid"
 readme = "README.md"
 
 [[bin]]
-name = "dloop"
+name = "bye"
 path = "src/main.rs"
 
 [dependencies]

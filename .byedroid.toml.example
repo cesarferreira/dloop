@@ -1,5 +1,6 @@
-# Copy to .loopcat.toml (or .droid-loop.toml) in your Android project root.
-# If omitted, dloop infers application IDs and default assemble/install tasks from app/build.gradle(.kts).
+# Copy to .byedroid.toml in your Android project root.
+# Legacy .loopcat.toml and .droid-loop.toml files are still read if present.
+# If omitted, bye infers application IDs and default assemble/install tasks from app/build.gradle(.kts).
 
 # Single package (optional if Gradle lists applicationId)
 # package = "com.example.app"
@@ -23,4 +24,4 @@ log_filters = ["OkHttp"]
 exclude_filters = ["chatty", "ViewRootImpl"]
 
 # Extra arguments passed to `scrcpy`
-scrcpy_args = ["--window-title", "DroidLoop"]
+scrcpy_args = ["--window-title", "ByeDroid"]

@@ -59,34 +59,47 @@ impl MergedConfig {
     }
 }
 
-/// Prefer `.loopcat.toml`, fall back to `.droid-loop.toml` (PRD name).
+/// Prefer `.byedroid.toml`, then fall back to legacy project config names.
 fn project_config_path(project_root: &Path) -> Option<PathBuf> {
-    let a = project_root.join(".loopcat.toml");
+    let a = project_root.join(".byedroid.toml");
     if a.exists() {
         return Some(a);
     }
-    let b = project_root.join(".droid-loop.toml");
+    let b = project_root.join(".loopcat.toml");
     if b.exists() {
         return Some(b);
+    }
+    let c = project_root.join(".droid-loop.toml");
+    if c.exists() {
+        return Some(c);
     }
     None
 }
 
-fn global_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("droid-loop").join("config.toml"))
+fn global_config_paths() -> Option<(PathBuf, PathBuf)> {
+    dirs::config_dir().map(|p| {
+        (
+            p.join("byedroid").join("config.toml"),
+            p.join("droid-loop").join("config.toml"),
+        )
+    })
 }
 
 pub fn load_global_config() -> Result<GlobalConfig> {
-    let path = global_config_path().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
-    if !path.exists() {
+    let (primary, legacy) = global_config_paths().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
+    let path = if primary.exists() {
+        primary
+    } else if legacy.exists() {
+        legacy
+    } else {
         return Ok(GlobalConfig::default());
-    }
+    };
     let s = fs::read_to_string(&path)?;
     Ok(toml::from_str(&s)?)
 }
 
 pub fn save_global_config(cfg: &GlobalConfig) -> Result<()> {
-    let path = global_config_path().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
+    let (path, _) = global_config_paths().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -96,7 +109,7 @@ pub fn save_global_config(cfg: &GlobalConfig) -> Result<()> {
 }
 
 pub fn save_project_config(project_root: &Path, cfg: &ProjectConfig) -> Result<()> {
-    let path = project_root.join(".loopcat.toml");
+    let path = project_root.join(".byedroid.toml");
     let s = toml::to_string_pretty(cfg)?;
     fs::write(&path, s)?;
     Ok(())

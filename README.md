@@ -1,8 +1,10 @@
-# dloop
+# byedroid
+
+> Bye, Android Studio.
 
 > You don't need Android Studio eating 4 GB of RAM just to read logcat and tap "Run".
 
-In the age of AI agents and terminal-first workflows, your editor is Cursor/Neovim/VS Code and your build system is Gradle on the command line. The only thing keeping Android Studio open was the run button and the log window. **dloop** replaces both with a single keystroke-driven TUI that starts in under a second.
+In the age of AI agents and terminal-first workflows, your editor is Cursor/Neovim/VS Code and your build system is Gradle on the command line. The only thing keeping Android Studio open was the run button and the log window. **byedroid** replaces both with a single keystroke-driven TUI that starts in under a second.
 
 ```
 ┌ Devices ──────────┐ Logcat ──────────────────────────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
  b build  i install  n run  d device  v variant  f filter  x exclude  w export  H history  m scrcpy  q quit
 ```
 
-**Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while dloop drives the device.
+**Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while `bye` drives the device.
 
 ## Features
 
@@ -32,10 +34,10 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 - **Crash / ANR detection** — crash blocks get a red highlight; count in the info bar; `y` opens a **crash detail** popup with the full log and shortcuts to copy, paste-ready agent prompt, export to file, or search online
 - **Scrollable log** — scroll back through history with `↑`/`↓` or `j`/`k`, `End` to return to tail
 - **Filter + Exclude** — live text filter (`f`) across tag + message; exclude filter (`x`) and config `exclude_filters` to silence noisy tags
-- **Export** — `w` writes the current filtered log to `dloop-<timestamp>.log` in the project root
+- **Export** — `w` writes the current filtered log to `bye-<timestamp>.log` in the project root
 - **scrcpy** — launch screen mirroring for the selected device (`m`)
-- **Per-project config** — `.loopcat.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
-- **`dloop init`** — scaffold `.loopcat.toml` from Gradle inference in one command
+- **Per-project config** — `.byedroid.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
+- **`bye init`** — scaffold `.byedroid.toml` from Gradle inference in one command
 
 ## Requirements
 
@@ -48,11 +50,11 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 
 ## Installation
 
-Binary name: **`dloop`**
+Binary name: **`bye`**
 
 ```bash
 # Homebrew
-brew install cesarferreira/tap/dloop
+brew install cesarferreira/tap/byedroid
 
 # Cargo (installs to ~/.cargo/bin)
 make install
@@ -72,16 +74,16 @@ Release tarballs and checksums for Homebrew: `make release`.
 
 ```bash
 # Run from your Android project root
-dloop
+bye
 
 # Point at a project
-dloop --project /path/to/my/android/app
+bye --project /path/to/my/android/app
 
 # Scaffold config without starting the TUI
-dloop init
+bye init
 ```
 
-dloop opens immediately. If a device is connected, logcat starts automatically and follows the
+bye opens immediately. If a device is connected, logcat starts automatically and follows the
 project's package(s) by default.
 
 ## Keybindings
@@ -98,7 +100,7 @@ project's package(s) by default.
 | `a` | Toggle all-logs / package-filter mode |
 | `f` | Open/close **include** filter |
 | `x` | Open/close **exclude** filter |
-| `w` | Export visible log lines to `dloop-<timestamp>.log` |
+| `w` | Export visible log lines to `bye-<timestamp>.log` |
 | `y` | Open **crash details** for the last crash, jump the log pane to that crash, then use `c` copy, `a` agent prompt to clipboard, `w` export to `crash-<timestamp>.log`, `s` Google search, `Esc` close |
 | `H` / `h` | Open/close build history overlay |
 | `Space` | Pause / resume log streaming |
@@ -118,7 +120,7 @@ In crash detail: `↑`/`↓` / `j`/`k` scroll the crash text; `PageUp`/`PageDown
 
 ## Gradle Inference
 
-dloop reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
+bye reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
 
 ```groovy
 android {
@@ -140,16 +142,17 @@ android {
 
 Result: default variant **`canaryDevDebug`**, tasks **`assembleCanaryDevDebug`** / **`installCanaryDevDebug`**, packages `["ai.example.app", "ai.example.app.dev"]`.
 
-Use the variant picker (`v`) to switch at runtime, or override in `.loopcat.toml`.
+Use the variant picker (`v`) to switch at runtime, or override in `.byedroid.toml`.
 
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `~/.config/droid-loop/config.toml` | Global: preferred device serial, default log level |
-| `.loopcat.toml` or `.droid-loop.toml` | Per-project overrides |
+| `~/.config/byedroid/config.toml` | Global: preferred device serial, default log level |
+| `.byedroid.toml` | Per-project overrides |
+| `.loopcat.toml` or `.droid-loop.toml` | Legacy per-project overrides still supported |
 
-**`.loopcat.toml` example:**
+**`.byedroid.toml` example:**
 
 ```toml
 # Explicit package list (skips inference)

@@ -1,4 +1,4 @@
-# Droid Loop TUI — install and dev tasks
+# ByeDroid TUI — install and dev tasks
 # Requires Rust toolchain (cargo) on PATH.
 
 PREFIX ?= /usr/local
@@ -15,25 +15,25 @@ install:
 	cargo install --path . --force
 
 uninstall:
-	cargo uninstall loopcat 2>/dev/null || true
+	cargo uninstall byedroid 2>/dev/null || true
 
 # Copy the release binary to ~/.local/bin — no sudo. Add ~/.local/bin to PATH if needed.
 install-user: build
 	mkdir -p $(USER_BIN)
-	install -m 755 target/release/dloop $(USER_BIN)/dloop
-	@echo "Installed $(USER_BIN)/dloop"
-	@echo "If \`dloop\` is not found, add this to your shell config: export PATH=\"$(USER_BIN):\$$PATH\""
+	install -m 755 target/release/bye $(USER_BIN)/bye
+	@echo "Installed $(USER_BIN)/bye"
+	@echo "If \`bye\` is not found, add this to your shell config: export PATH=\"$(USER_BIN):\$$PATH\""
 
 uninstall-user:
-	rm -f $(USER_BIN)/dloop
+	rm -f $(USER_BIN)/bye
 
 # System-wide install (default: /usr/local/bin). Requires sudo on macOS/Linux.
 install-system: build
-	sudo install -m 755 target/release/dloop $(PREFIX)/bin/dloop
-	@echo "Installed $(PREFIX)/bin/dloop"
+	sudo install -m 755 target/release/bye $(PREFIX)/bin/bye
+	@echo "Installed $(PREFIX)/bin/bye"
 
 uninstall-system:
-	sudo rm -f $(PREFIX)/bin/dloop
+	sudo rm -f $(PREFIX)/bin/bye
 
 build:
 	cargo build --release
@@ -54,17 +54,17 @@ clean:
 	cargo clean
 
 # Build release tarballs for Homebrew (host + cross-targets when installed).
-# Update sha256 placeholders in `homebrew-tap/Formula/dloop.rb` from the output.
+# Update sha256 placeholders in `homebrew-tap/Formula/byedroid.rb` from the output.
 release: build
 	mkdir -p dist
 	HOST=$$(rustc -vV | sed -n 's/^host: //p'); \
-	tar -czvf "dist/dloop-$(REL_VERSION)-$$HOST.tar.gz" -C target/release dloop && \
-	shasum -a 256 "dist/dloop-$(REL_VERSION)-$$HOST.tar.gz"
+	tar -czvf "dist/byedroid-$(REL_VERSION)-$$HOST.tar.gz" -C target/release bye && \
+	shasum -a 256 "dist/byedroid-$(REL_VERSION)-$$HOST.tar.gz"
 	@for triple in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do \
 		if rustup target list --installed 2>/dev/null | grep -q "^$$triple$$"; then \
 			echo "Building $$triple..."; \
 			cargo build --release --target "$$triple" && \
-			tar -czvf "dist/dloop-$(REL_VERSION)-$$triple.tar.gz" -C "target/$$triple/release" dloop && \
-			shasum -a 256 "dist/dloop-$(REL_VERSION)-$$triple.tar.gz"; \
+			tar -czvf "dist/byedroid-$(REL_VERSION)-$$triple.tar.gz" -C "target/$$triple/release" bye && \
+			shasum -a 256 "dist/byedroid-$(REL_VERSION)-$$triple.tar.gz"; \
 		fi; \
 	done

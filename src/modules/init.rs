@@ -1,4 +1,4 @@
-//! `dloop init` — scaffold `.loopcat.toml` from Gradle inference.
+//! `bye init` — scaffold `.byedroid.toml` from Gradle inference.
 use anyhow::Result;
 use std::path::Path;
 
@@ -19,7 +19,7 @@ pub fn run_init(project_root: &Path) -> Result<()> {
 
     save_project_config(project_root, &cfg)?;
 
-    println!("Wrote .loopcat.toml in {}", project_root.display());
+    println!("Wrote .byedroid.toml in {}", project_root.display());
     if let Some(ref a) = cfg.assemble_task {
         println!("  assemble_task = {a:?}");
     }

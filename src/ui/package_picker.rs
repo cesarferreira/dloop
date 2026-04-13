@@ -9,7 +9,8 @@ use crate::app::App;
 
 pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     let filtered = app.filtered_package_list();
-    let item_count = (filtered.len() + 2) as u16; // +1 for "All" +1 for input
+    let has_custom_entry = filtered.is_empty() && !app.package_picker_input.is_empty();
+    let item_count = (filtered.len() + 2 + usize::from(has_custom_entry)) as u16; // +1 for "All" +1 for input + optional custom row
     let popup_h = (item_count + 4).min(area.height.saturating_sub(6)).max(7);
     let popup_w = 56_u16.min(area.width.saturating_sub(4));
     let popup = centered(popup_w, popup_h, area);
@@ -122,10 +123,18 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     // If input has text but no matches, offer to use the typed text
-    if filtered.is_empty() && !app.package_picker_input.is_empty() {
+    if has_custom_entry {
+        let sel = app.package_picker_cursor == filtered.len() + 1;
         items.push(ListItem::new(Line::from(Span::styled(
             format!("  Use: {}", app.package_picker_input),
-            Style::default().fg(Color::Yellow),
+            Style::default()
+                .fg(if sel { Color::Black } else { Color::Yellow })
+                .bg(if sel { Color::Cyan } else { Color::Reset })
+                .add_modifier(if sel {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ))));
     }
 

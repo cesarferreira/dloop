@@ -1,6 +1,6 @@
 //! Application state and main run loop.
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Stdout, Write};
 use std::path::PathBuf;
@@ -204,6 +204,7 @@ pub struct App {
 
     pub device_props: HashMap<String, String>,
     pub device_battery: Option<u8>,
+    pub installed_device_packages: Vec<String>,
     pub last_device_info_refresh: Instant,
 
     pub build_history_open: bool,
@@ -305,19 +306,20 @@ impl App {
             return all;
         }
         let q = self.package_picker_input.to_lowercase();
-        all.into_iter()
-            .filter(|p| p.to_lowercase().contains(&q))
-            .collect()
+        let mut matches: Vec<(PackageMatchScore, String)> = all
+            .into_iter()
+            .filter_map(|pkg| package_match_score(&pkg, &q).map(|score| (score, pkg)))
+            .collect();
+        matches.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        matches.into_iter().map(|(_, pkg)| pkg).collect()
     }
 
     pub fn all_known_packages(&self) -> Vec<String> {
-        let mut pkgs: Vec<String> = self.effective_packages.clone();
-        for p in &self.inference.application_ids {
-            if !pkgs.contains(p) {
-                pkgs.push(p.clone());
-            }
-        }
-        pkgs
+        merge_known_packages(
+            &self.effective_packages,
+            &self.inference.application_ids,
+            &self.installed_device_packages,
+        )
     }
 }
 
@@ -381,6 +383,7 @@ impl App {
             current_crash: None,
             device_props: HashMap::new(),
             device_battery: None,
+            installed_device_packages: Vec::new(),
             last_device_info_refresh: Instant::now() - Duration::from_secs(60),
             build_history_open: false,
             build_history_scroll: 0,
@@ -415,6 +418,8 @@ impl App {
                 app.selected_device = idx;
             }
         }
+        app.refresh_device_info();
+        app.refresh_device_packages();
         // Auto-start logcat if a device is already connected.
         if !app.devices.is_empty() {
             let _ = app.start_logcat();
@@ -445,6 +450,7 @@ impl App {
         }
         self.last_device_refresh = Instant::now();
         self.refresh_device_info();
+        self.refresh_device_packages();
         // Auto-start logcat when a device becomes available and it isn't running yet.
         if !self.devices.is_empty() && !self.logcat_running {
             let _ = self.start_logcat();
@@ -464,6 +470,17 @@ impl App {
             .unwrap_or_default();
         self.device_battery = self.adb.get_battery_level(serial.as_str()).ok().flatten();
         self.last_device_info_refresh = Instant::now();
+    }
+
+    fn refresh_device_packages(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.installed_device_packages.clear();
+            return;
+        };
+        self.installed_device_packages = self
+            .adb
+            .list_installed_packages(serial.as_str())
+            .unwrap_or_default();
     }
 
     fn tick_device_info_refresh(&mut self) {
@@ -1054,6 +1071,7 @@ impl App {
                 self.build_history_scroll = 0;
             }
             Action::OpenPackagePicker => {
+                self.refresh_device_packages();
                 self.package_picker_open = true;
                 self.package_picker_input.clear();
                 self.package_picker_cursor = 0;
@@ -1069,7 +1087,10 @@ impl App {
                             (self.device_picker_cursor + 1) % self.devices.len();
                     }
                 } else if self.package_picker_open {
-                    let n = self.filtered_package_list().len() + 1; // +1 for "All"
+                    let filtered = self.filtered_package_list();
+                    let has_custom_entry =
+                        filtered.is_empty() && !self.package_picker_input.is_empty();
+                    let n = filtered.len() + 1 + usize::from(has_custom_entry); // +1 for "All"
                     self.package_picker_cursor = (self.package_picker_cursor + 1) % n.max(1);
                 } else if self.picker_open && !self.picker_variants.is_empty() {
                     self.picker_cursor = (self.picker_cursor + 1) % self.picker_variants.len();
@@ -1087,7 +1108,10 @@ impl App {
                         };
                     }
                 } else if self.package_picker_open {
-                    let n = self.filtered_package_list().len() + 1;
+                    let filtered = self.filtered_package_list();
+                    let has_custom_entry =
+                        filtered.is_empty() && !self.package_picker_input.is_empty();
+                    let n = filtered.len() + 1 + usize::from(has_custom_entry);
                     self.package_picker_cursor = if self.package_picker_cursor == 0 {
                         n.saturating_sub(1)
                     } else {
@@ -1106,6 +1130,7 @@ impl App {
                     self.selected_device = self.device_picker_cursor;
                     self.persist_preferred_device();
                     self.refresh_device_info();
+                    self.refresh_device_packages();
                     if self.logcat_running {
                         self.stop_logcat();
                         let _ = self.start_logcat();
@@ -1113,24 +1138,22 @@ impl App {
                     self.device_picker_open = false;
                 } else if self.package_picker_open {
                     let filtered = self.filtered_package_list();
+                    let has_custom_entry =
+                        filtered.is_empty() && !self.package_picker_input.is_empty();
                     if self.package_picker_cursor == 0 {
                         // "All packages"
                         self.active_package_filter = None;
                         self.show_all_logs = true;
-                    } else {
-                        let idx = self.package_picker_cursor - 1;
-                        if let Some(pkg) = filtered.get(idx).cloned() {
-                            // If user typed something not in list, use the typed text
-                            let chosen =
-                                if filtered.is_empty() && !self.package_picker_input.is_empty() {
-                                    self.package_picker_input.clone()
-                                } else {
-                                    pkg
-                                };
-                            self.active_package_filter = Some(chosen.clone());
-                            self.show_all_logs = false;
-                            self.show_toast(format!("Filtering: {chosen}"));
-                        }
+                    } else if let Some(pkg) = filtered.get(self.package_picker_cursor - 1).cloned()
+                    {
+                        self.active_package_filter = Some(pkg.clone());
+                        self.show_all_logs = false;
+                        self.show_toast(format!("Filtering: {pkg}"));
+                    } else if has_custom_entry && self.package_picker_cursor == filtered.len() + 1 {
+                        let chosen = self.package_picker_input.clone();
+                        self.active_package_filter = Some(chosen.clone());
+                        self.show_all_logs = false;
+                        self.show_toast(format!("Filtering: {chosen}"));
                     }
                     self.package_picker_open = false;
                     self.package_picker_input.clear();
@@ -1381,9 +1404,90 @@ fn extract_application_id_from_metadata(json: &str) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct PackageMatchScore {
+    tier: u8,
+    metric: usize,
+    len: usize,
+}
+
+fn package_match_score(pkg: &str, query: &str) -> Option<PackageMatchScore> {
+    if query.is_empty() {
+        return Some(PackageMatchScore {
+            tier: 0,
+            metric: 0,
+            len: pkg.len(),
+        });
+    }
+
+    let lower = pkg.to_lowercase();
+    if lower.starts_with(query) {
+        return Some(PackageMatchScore {
+            tier: 0,
+            metric: lower.len().saturating_sub(query.len()),
+            len: lower.len(),
+        });
+    }
+    if let Some(pos) = lower.find(query) {
+        return Some(PackageMatchScore {
+            tier: 1,
+            metric: pos,
+            len: lower.len(),
+        });
+    }
+
+    let mut last_idx = 0usize;
+    let mut started = false;
+    let mut gap_cost = 0usize;
+    let mut chars = lower.char_indices();
+
+    for q in query.chars() {
+        let Some((idx, _)) = chars.find(|(_, c)| *c == q) else {
+            return None;
+        };
+        if started {
+            gap_cost += idx.saturating_sub(last_idx);
+        } else {
+            gap_cost += idx;
+            started = true;
+        }
+        last_idx = idx + q.len_utf8();
+    }
+
+    Some(PackageMatchScore {
+        tier: 2,
+        metric: gap_cost,
+        len: lower.len(),
+    })
+}
+
+fn merge_known_packages(
+    effective_packages: &[String],
+    inferred_packages: &[String],
+    installed_packages: &[String],
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+
+    for pkg in effective_packages
+        .iter()
+        .chain(inferred_packages.iter())
+        .chain(installed_packages.iter())
+    {
+        if seen.insert(pkg.clone()) {
+            merged.push(pkg.clone());
+        }
+    }
+
+    merged
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{scroll_offset_to_entry, LogEntry};
+    use super::{
+        merge_known_packages, package_match_score, scroll_offset_to_entry, LogEntry,
+        PackageMatchScore,
+    };
 
     fn entry(raw: &str) -> LogEntry {
         LogEntry {
@@ -1426,5 +1530,45 @@ mod tests {
 
         let scroll = scroll_offset_to_entry(&lines, &crash, |entry| entry.raw != "hidden");
         assert_eq!(scroll, Some(1));
+    }
+
+    #[test]
+    fn merge_known_packages_keeps_priority_and_dedups() {
+        let effective = vec!["ai.wayve.app.dev".to_string()];
+        let inferred = vec!["ai.wayve.app".to_string(), "ai.wayve.app.dev".to_string()];
+        let installed = vec![
+            "android".to_string(),
+            "ai.wayve.app".to_string(),
+            "com.example.tool".to_string(),
+        ];
+
+        assert_eq!(
+            merge_known_packages(&effective, &inferred, &installed),
+            vec![
+                "ai.wayve.app.dev".to_string(),
+                "ai.wayve.app".to_string(),
+                "android".to_string(),
+                "com.example.tool".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn package_match_prefers_prefix_then_contains_then_fuzzy() {
+        let prefix = package_match_score("wayve.driver", "way").unwrap();
+        let contains = package_match_score("com.wayve.driver", "way").unwrap();
+        let fuzzy = package_match_score("com.wax_y.app", "way").unwrap();
+
+        assert_eq!(
+            package_match_score("ai.wayve.driver", "ai"),
+            Some(PackageMatchScore {
+                tier: 0,
+                metric: "ai.wayve.driver".len() - 2,
+                len: "ai.wayve.driver".len(),
+            })
+        );
+        assert!(prefix < contains);
+        assert!(contains < fuzzy);
+        assert!(package_match_score("com.example.app", "wve").is_none());
     }
 }

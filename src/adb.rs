@@ -159,4 +159,22 @@ impl AdbClient {
         }
         Ok(pids)
     }
+
+    /// List installed package names from the selected device.
+    pub fn list_installed_packages(&self, device: &str) -> Result<Vec<String>> {
+        let output = self.run_command(&["-s", device, "shell", "pm", "list", "packages"])?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut packages = Vec::new();
+        for line in stdout.lines() {
+            if let Some(pkg) = line.trim().strip_prefix("package:") {
+                let pkg = pkg.trim();
+                if !pkg.is_empty() {
+                    packages.push(pkg.to_string());
+                }
+            }
+        }
+        packages.sort();
+        packages.dedup();
+        Ok(packages)
+    }
 }

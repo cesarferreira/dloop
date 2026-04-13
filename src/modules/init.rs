@@ -1,4 +1,4 @@
-//! `bye init` — scaffold `.byedroid.toml` from Gradle inference.
+//! `bd init` — scaffold `.byedroid.toml` from Gradle inference.
 use anyhow::Result;
 use std::path::Path;
 

@@ -20,7 +20,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
  b build  i install  n run  d device  v variant  f filter  x exclude  w export  H history  m scrcpy  q quit
 ```
 
-**Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while `bye` drives the device.
+**Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while `byedroid` drives the device.
 
 ## Features
 
@@ -34,10 +34,10 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 - **Crash / ANR detection** — crash blocks get a red highlight; count in the info bar; `y` opens a **crash detail** popup with the full log and shortcuts to copy, paste-ready agent prompt, export to file, or search online
 - **Scrollable log** — scroll back through history with `↑`/`↓` or `j`/`k`, `End` to return to tail
 - **Filter + Exclude** — live text filter (`f`) across tag + message; exclude filter (`x`) and config `exclude_filters` to silence noisy tags
-- **Export** — `w` writes the current filtered log to `bye-<timestamp>.log` in the project root
+- **Export** — `w` writes the current filtered log to `byedroid-<timestamp>.log` in the project root
 - **scrcpy** — launch screen mirroring for the selected device (`m`)
 - **Per-project config** — `.byedroid.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
-- **`bye init`** — scaffold `.byedroid.toml` from Gradle inference in one command
+- **`bd init`** — scaffold `.byedroid.toml` from Gradle inference in one command
 
 ## Requirements
 
@@ -50,7 +50,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 
 ## Installation
 
-Binary name: **`bye`**
+Binary name: **`bd`**
 
 ```bash
 # Homebrew
@@ -74,16 +74,16 @@ Release tarballs and checksums for Homebrew: `make release`.
 
 ```bash
 # Run from your Android project root
-bye
+bd
 
 # Point at a project
-bye --project /path/to/my/android/app
+bd --project /path/to/my/android/app
 
 # Scaffold config without starting the TUI
-bye init
+bd init
 ```
 
-bye opens immediately. If a device is connected, logcat starts automatically and follows the
+bd opens immediately. If a device is connected, logcat starts automatically and follows the
 project's package(s) by default.
 
 ## Keybindings
@@ -100,7 +100,7 @@ project's package(s) by default.
 | `a` | Toggle all-logs / package-filter mode |
 | `f` | Open/close **include** filter |
 | `x` | Open/close **exclude** filter |
-| `w` | Export visible log lines to `bye-<timestamp>.log` |
+| `w` | Export visible log lines to `byedroid-<timestamp>.log` |
 | `y` | Open **crash details** for the last crash, jump the log pane to that crash, then use `c` copy, `a` agent prompt to clipboard, `w` export to `crash-<timestamp>.log`, `s` Google search, `Esc` close |
 | `H` / `h` | Open/close build history overlay |
 | `Space` | Pause / resume log streaming |
@@ -120,7 +120,7 @@ In crash detail: `↑`/`↓` / `j`/`k` scroll the crash text; `PageUp`/`PageDown
 
 ## Gradle Inference
 
-bye reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
+bd reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
 
 ```groovy
 android {

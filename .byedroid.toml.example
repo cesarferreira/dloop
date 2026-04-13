@@ -1,6 +1,6 @@
 # Copy to .byedroid.toml in your Android project root.
 # Legacy .loopcat.toml and .droid-loop.toml files are still read if present.
-# If omitted, bye infers application IDs and default assemble/install tasks from app/build.gradle(.kts).
+# If omitted, byedroid infers application IDs and default assemble/install tasks from app/build.gradle(.kts).
 
 # Single package (optional if Gradle lists applicationId)
 # package = "com.example.app"

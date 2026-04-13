@@ -20,20 +20,20 @@ uninstall:
 # Copy the release binary to ~/.local/bin — no sudo. Add ~/.local/bin to PATH if needed.
 install-user: build
 	mkdir -p $(USER_BIN)
-	install -m 755 target/release/bye $(USER_BIN)/bye
-	@echo "Installed $(USER_BIN)/bye"
-	@echo "If \`bye\` is not found, add this to your shell config: export PATH=\"$(USER_BIN):\$$PATH\""
+	install -m 755 target/release/bd $(USER_BIN)/bd
+	@echo "Installed $(USER_BIN)/bd"
+	@echo "If \`bd\` is not found, add this to your shell config: export PATH=\"$(USER_BIN):\$$PATH\""
 
 uninstall-user:
-	rm -f $(USER_BIN)/bye
+	rm -f $(USER_BIN)/bd
 
 # System-wide install (default: /usr/local/bin). Requires sudo on macOS/Linux.
 install-system: build
-	sudo install -m 755 target/release/bye $(PREFIX)/bin/bye
-	@echo "Installed $(PREFIX)/bin/bye"
+	sudo install -m 755 target/release/bd $(PREFIX)/bin/bd
+	@echo "Installed $(PREFIX)/bin/bd"
 
 uninstall-system:
-	sudo rm -f $(PREFIX)/bin/bye
+	sudo rm -f $(PREFIX)/bin/bd
 
 build:
 	cargo build --release
@@ -58,13 +58,13 @@ clean:
 release: build
 	mkdir -p dist
 	HOST=$$(rustc -vV | sed -n 's/^host: //p'); \
-	tar -czvf "dist/byedroid-$(REL_VERSION)-$$HOST.tar.gz" -C target/release bye && \
+	tar -czvf "dist/byedroid-$(REL_VERSION)-$$HOST.tar.gz" -C target/release bd && \
 	shasum -a 256 "dist/byedroid-$(REL_VERSION)-$$HOST.tar.gz"
 	@for triple in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do \
 		if rustup target list --installed 2>/dev/null | grep -q "^$$triple$$"; then \
 			echo "Building $$triple..."; \
 			cargo build --release --target "$$triple" && \
-			tar -czvf "dist/byedroid-$(REL_VERSION)-$$triple.tar.gz" -C "target/$$triple/release" bye && \
+			tar -czvf "dist/byedroid-$(REL_VERSION)-$$triple.tar.gz" -C "target/$$triple/release" bd && \
 			shasum -a 256 "dist/byedroid-$(REL_VERSION)-$$triple.tar.gz"; \
 		fi; \
 	done

@@ -8,7 +8,7 @@ repository = "https://github.com/cesarferreira/byedroid"
 readme = "README.md"
 
 [[bin]]
-name = "bye"
+name = "bd"
 path = "src/main.rs"
 
 [dependencies]

@@ -529,7 +529,7 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let path = self.project_root.join(format!("bye-{ts}.log"));
+        let path = self.project_root.join(format!("byedroid-{ts}.log"));
         let mut f = fs::File::create(&path)?;
         let mut n = 0usize;
         for entry in &self.log_lines {

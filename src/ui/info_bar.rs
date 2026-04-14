@@ -299,7 +299,7 @@ fn row3(app: &App) -> Paragraph<'static> {
             Style::default().fg(Color::Rgb(120, 210, 150)),
         ));
         spans.push(Span::styled(
-            truncate(branch, 24),
+            branch.clone(),
             Style::default()
                 .fg(Color::Rgb(160, 230, 185))
                 .add_modifier(Modifier::BOLD),

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Stdout, Write};
 use std::path::PathBuf;
-use std::process::Child;
+use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -27,6 +27,7 @@ use crate::modules::mirror::launch_scrcpy;
 use crate::modules::project::{infer_project, ProjectInference};
 
 const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const GIT_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Build a list of selectable (label, assemble_task, install_task) variants.
 fn build_variant_list(
@@ -144,6 +145,42 @@ fn preferred_device_index(
     previous_selected.min(devices.len().saturating_sub(1))
 }
 
+fn discover_current_branch(project_root: &std::path::Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(project_root)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        None
+    } else if branch == "HEAD" {
+        let output = Command::new("git")
+            .args(["-C"])
+            .arg(project_root)
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return Some("detached".to_string());
+        }
+        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if sha.is_empty() {
+            Some("detached".to_string())
+        } else {
+            Some(format!("detached@{sha}"))
+        }
+    } else {
+        Some(branch)
+    }
+}
+
 fn scroll_offset_to_entry<F>(
     log_lines: &[LogEntry],
     target: &LogEntry,
@@ -249,6 +286,7 @@ pub struct App {
     pub adb: AdbClient,
     pub project_root: PathBuf,
     pub config: MergedConfig,
+    pub current_branch: Option<String>,
 
     pub devices: Vec<Device>,
     pub selected_device: usize,
@@ -315,6 +353,7 @@ pub struct App {
     tx_build: mpsc::Sender<String>,
 
     pub last_device_refresh: Instant,
+    pub last_git_refresh: Instant,
     pub pid_refresh: Instant,
 
     /// Parsed from `app/build.gradle(.kts)` when possible.
@@ -443,6 +482,7 @@ impl App {
 
 impl App {
     pub fn new(project_root: PathBuf, config: MergedConfig) -> Result<Self> {
+        let current_branch = discover_current_branch(&project_root);
         let adb = AdbClient::new()?;
         let inference = infer_project(&project_root).unwrap_or_else(|_| ProjectInference {
             variant_summary: "Could not read Gradle files".to_string(),
@@ -472,6 +512,7 @@ impl App {
             adb,
             project_root,
             config,
+            current_branch,
             devices: Vec::new(),
             selected_device: 0,
             active_pane: Pane::Logs,
@@ -520,6 +561,7 @@ impl App {
             rx_build,
             tx_build,
             last_device_refresh: Instant::now(),
+            last_git_refresh: Instant::now(),
             pid_refresh: Instant::now(),
             inference,
             effective_packages,
@@ -593,6 +635,21 @@ impl App {
             return;
         }
         let _ = self.refresh_devices();
+    }
+
+    fn tick_git_refresh(&mut self) {
+        if self.last_git_refresh.elapsed() < GIT_REFRESH_INTERVAL {
+            return;
+        }
+        self.last_git_refresh = Instant::now();
+
+        let branch = discover_current_branch(&self.project_root);
+        if branch != self.current_branch {
+            self.current_branch = branch.clone();
+            if let Some(branch) = branch {
+                self.show_toast(format!("Branch: {branch}"));
+            }
+        }
     }
 
     fn refresh_device_info(&mut self) {
@@ -1430,6 +1487,7 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
         app.drain_channels();
         app.poll_build_finished();
         app.tick_device_refresh();
+        app.tick_git_refresh();
         app.tick_pid_refresh();
         app.tick_device_info_refresh();
 

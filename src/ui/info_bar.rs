@@ -291,6 +291,21 @@ fn row3(app: &App) -> Paragraph<'static> {
     spans.push(Span::styled("project  ", Style::default().fg(DIM)));
     spans.push(Span::styled(path, Style::default().fg(MUTED)));
 
+    if let Some(branch) = &app.current_branch {
+        spans.push(sep());
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            " ",
+            Style::default().fg(Color::Rgb(120, 210, 150)),
+        ));
+        spans.push(Span::styled(
+            truncate(branch, 24),
+            Style::default()
+                .fg(Color::Rgb(160, 230, 185))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     if app.filter_focused {
         spans.push(sep());
         spans.push(Span::raw("  "));

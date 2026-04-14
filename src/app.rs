@@ -26,6 +26,8 @@ use crate::modules::logcat::{
 use crate::modules::mirror::launch_scrcpy;
 use crate::modules::project::{infer_project, ProjectInference};
 
+const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Build a list of selectable (label, assemble_task, install_task) variants.
 fn build_variant_list(
     inference: &ProjectInference,
@@ -121,6 +123,25 @@ fn same_log_entry(a: &LogEntry, b: &LogEntry) -> bool {
         && a.tag == b.tag
         && a.level == b.level
         && a.message == b.message
+}
+
+fn preferred_device_index(
+    devices: &[Device],
+    previous_serial: Option<&str>,
+    preferred_serial: Option<&str>,
+    previous_selected: usize,
+) -> usize {
+    if let Some(serial) = previous_serial {
+        if let Some(idx) = devices.iter().position(|d| d.serial == serial) {
+            return idx;
+        }
+    }
+    if let Some(serial) = preferred_serial {
+        if let Some(idx) = devices.iter().position(|d| d.serial == serial) {
+            return idx;
+        }
+    }
+    previous_selected.min(devices.len().saturating_sub(1))
 }
 
 fn scroll_offset_to_entry<F>(
@@ -534,28 +555,44 @@ impl App {
     }
 
     pub fn refresh_devices(&mut self) -> Result<()> {
+        let had_devices = !self.devices.is_empty();
+        let previous_selected = self.selected_device;
         let prev = self.selected_serial().map(|s| s.to_string());
         self.devices = scan_devices(&self.adb)?;
-        if let Some(prev_serial) = prev {
-            if !self.devices.iter().any(|d| d.serial == prev_serial) {
+        if let Some(ref prev_serial) = prev {
+            if !self.devices.iter().any(|d| d.serial == *prev_serial) {
                 self.show_toast("Device disconnected — stopped logcat");
                 self.stop_logcat();
                 self.selected_device = 0;
-            } else if let Some(idx) = self.devices.iter().position(|d| d.serial == prev_serial) {
-                self.selected_device = idx;
             }
         }
-        if !self.devices.is_empty() && self.selected_device >= self.devices.len() {
-            self.selected_device = self.devices.len() - 1;
+
+        if !self.devices.is_empty() {
+            self.selected_device = preferred_device_index(
+                &self.devices,
+                prev.as_deref(),
+                self.config.global.preferred_device_serial.as_deref(),
+                previous_selected,
+            );
         }
         self.last_device_refresh = Instant::now();
         self.refresh_device_info();
         self.refresh_device_packages();
         // Auto-start logcat when a device becomes available and it isn't running yet.
         if !self.devices.is_empty() && !self.logcat_running {
+            if had_devices {
+                self.show_toast("Device connected — resumed logcat");
+            }
             let _ = self.start_logcat();
         }
         Ok(())
+    }
+
+    fn tick_device_refresh(&mut self) {
+        if self.last_device_refresh.elapsed() < DEVICE_REFRESH_INTERVAL {
+            return;
+        }
+        let _ = self.refresh_devices();
     }
 
     fn refresh_device_info(&mut self) {
@@ -1392,6 +1429,7 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
     loop {
         app.drain_channels();
         app.poll_build_finished();
+        app.tick_device_refresh();
         app.tick_pid_refresh();
         app.tick_device_info_refresh();
 
@@ -1624,8 +1662,8 @@ fn merge_known_packages(
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_known_packages, package_match_score, scroll_offset_to_entry, LevelFilterMode,
-        LogEntry, PackageMatchScore,
+        merge_known_packages, package_match_score, preferred_device_index, scroll_offset_to_entry,
+        Device, LevelFilterMode, LogEntry, PackageMatchScore,
     };
 
     fn entry(raw: &str) -> LogEntry {
@@ -1717,5 +1755,29 @@ mod tests {
         assert_eq!(LevelFilterMode::WarningsPlus.levels(), Some("W,E,F"));
         assert_eq!(LevelFilterMode::All.levels(), Some(""));
         assert_eq!(LevelFilterMode::ConfigDefault.levels(), None);
+    }
+
+    #[test]
+    fn preferred_device_index_prefers_previous_serial_then_preferred_serial() {
+        let devices = vec![
+            Device {
+                serial: "emulator-5554".to_string(),
+                model: "Emulator".to_string(),
+            },
+            Device {
+                serial: "pixel-serial".to_string(),
+                model: "Pixel".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            preferred_device_index(&devices, Some("pixel-serial"), Some("emulator-5554"), 0),
+            1
+        );
+        assert_eq!(
+            preferred_device_index(&devices, None, Some("pixel-serial"), 0),
+            1
+        );
+        assert_eq!(preferred_device_index(&devices, None, None, 0), 0);
     }
 }

@@ -38,7 +38,7 @@ fn status_text(app: &App) -> String {
     }
     let n = app.devices.len();
     if n == 0 {
-        return "No devices — connect one or press r to refresh".to_string();
+        return "No devices — connect one".to_string();
     }
     format!(
         "{} device{}  ·  {} log lines",
@@ -78,6 +78,6 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::Rgb(86, 95, 137)));
 
-    let p = Paragraph::new(vec![line1, line2]).block(block);
+    let p = Paragraph::new(vec![line1, Line::from(""), line2]).block(block);
     f.render_widget(p, area);
 }

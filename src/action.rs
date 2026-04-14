@@ -44,4 +44,5 @@ pub enum Action {
     LaunchScrcpy,
     StopProcess,
     ConfirmNo,
+    OpenHelp,
 }

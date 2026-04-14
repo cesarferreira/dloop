@@ -62,28 +62,15 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
         )])
     };
 
-    // Line 2: key caps — palette inspired by Tokyo Night / Catppuccin-style pastels
+    // Line 2: essential shortcuts only — press ? for the full list
     let c = |k: &str, d: &str, bg: Color| vec![cap(k, bg), label(d)];
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(c("b", "build", Color::Rgb(137, 180, 250)));
     spans.extend(c("i", "install", Color::Rgb(245, 194, 231)));
     spans.extend(c("n", "run", Color::Rgb(166, 227, 161)));
-    spans.extend(c("d", "device", Color::Rgb(148, 226, 213)));
-    spans.extend(c("v", "variant", Color::Rgb(180, 190, 254)));
-    spans.extend(c("p", "pkg filter", Color::Rgb(249, 226, 175)));
-    spans.extend(c("e", "build log", Color::Rgb(137, 220, 235)));
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
-    spans.extend(c("L", "levels", Color::Rgb(244, 162, 97)));
-    spans.extend(c("a", "all/pkg", Color::Rgb(249, 226, 175)));
-    spans.extend(c("f", "filter", Color::Rgb(249, 226, 175)));
-    spans.extend(c("x", "exclude", Color::Rgb(250, 179, 135)));
-    spans.extend(c("w", "export", Color::Rgb(166, 218, 149)));
-    spans.extend(c("y", "crash details", Color::Rgb(243, 188, 219)));
-    spans.extend(c("H", "history", Color::Rgb(180, 190, 254)));
-    spans.extend(c("c", "clear", Color::Rgb(137, 220, 235)));
-    spans.extend(c("s", "stop", Color::Rgb(243, 139, 168)));
-    spans.extend(c("m", "scrcpy", Color::Rgb(180, 190, 254)));
     spans.extend(c("q", "quit", Color::Rgb(148, 226, 213)));
+    spans.extend(c("?", "help", Color::Rgb(249, 226, 175)));
 
     let line2 = Line::from(spans);
 

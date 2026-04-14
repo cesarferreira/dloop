@@ -336,6 +336,7 @@ pub struct App {
 
     pub build_history_open: bool,
     pub build_history_scroll: usize,
+    pub help_open: bool,
 
     pub build_child: Option<Child>,
     pub build_task: Option<String>,
@@ -406,6 +407,9 @@ impl App {
         }
         if self.build_history_open {
             return Modal::BuildHistory;
+        }
+        if self.help_open {
+            return Modal::HelpPopup;
         }
         Modal::None
     }
@@ -549,6 +553,7 @@ impl App {
             last_device_info_refresh: Instant::now() - Duration::from_secs(60),
             build_history_open: false,
             build_history_scroll: 0,
+            help_open: false,
             build_child: None,
             build_task: None,
             build_start: None,
@@ -1187,6 +1192,9 @@ impl App {
                     self.show_toast(format!("search: {e}"));
                 }
             }
+            Action::OpenHelp => {
+                self.help_open = !self.help_open;
+            }
             Action::ConfirmNo => {
                 self.filter_focused = false;
                 self.exclude_focused = false;
@@ -1197,6 +1205,7 @@ impl App {
                 self.build_popup_open = false;
                 self.package_picker_open = false;
                 self.build_history_open = false;
+                self.help_open = false;
                 self.package_picker_input.clear();
             }
             Action::ClearLogs => self.clear_logs(),
@@ -1413,6 +1422,7 @@ impl App {
                 self.build_popup_open = false;
                 self.package_picker_open = false;
                 self.build_history_open = false;
+                self.help_open = false;
                 self.package_picker_input.clear();
             }
             Action::BuildDebug => {

@@ -24,6 +24,7 @@ pub enum Modal {
     PackagePicker,
     BuildHistory,
     CrashDetail,
+    HelpPopup,
 }
 
 pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<AppEvent>> {
@@ -45,12 +46,21 @@ pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<App
                 Modal::PackagePicker => map_package_picker(key.code, key.modifiers),
                 Modal::BuildHistory => map_build_history(key.code),
                 Modal::CrashDetail => map_crash_detail(key.code),
+                Modal::HelpPopup => map_help_popup(key.code),
                 Modal::None => map_normal(key.code, key.modifiers),
             })
         }
         Event::Resize(_, _) => Ok(None),
         _ => Ok(None),
     }
+}
+
+fn map_help_popup(code: KeyCode) -> Option<AppEvent> {
+    let a = match code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Action::PickerCancel,
+        _ => return None,
+    };
+    Some(AppEvent::Action(a))
 }
 
 fn map_picker(code: KeyCode) -> Option<AppEvent> {
@@ -190,6 +200,7 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('r') => Some(Action::RefreshDevices),
         KeyCode::Char('w') | KeyCode::Char('W') => Some(Action::ExportLogs),
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::OpenCrashDetail),
+        KeyCode::Char('?') => Some(Action::OpenHelp),
 
         _ => None,
     };

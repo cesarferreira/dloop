@@ -8,19 +8,6 @@
 
 In the age of AI agents and terminal-first workflows, your editor is Cursor/Neovim/VS Code and your build system is Gradle on the command line. The only thing keeping Android Studio open was the run button and the log window. **byedroid** replaces both with a single keystroke-driven TUI that starts in under a second.
 
-```
-┌ Devices ──────────┐ Logcat ──────────────────────────────────────────────────────────────────────────────
-│ ▶ Pixel 9         │ ● LIVE  streaming  [all]
-│   XXXXXXX…        │ no filter
-│                   │
-│                   │ 15:43:12  OkHttp              I   --> GET https://api.example.com/v1/health
-├ Build ▸ ──────────│ 15:43:12  OkHttp              I   <-- 200 OK (123ms)
-│ CanaryDevDebug    │ 15:43:13  HealthViewModel      I   health_state_changed: {status=OK}
-│                   │ 15:43:13  HealthViewModel      I   fleet_connection: true
-└───────────────────┘ 15:43:14  Analytics            D   Event: screen_view {screen=Home}
-────────────────────────────────────────────────────────────────────────────────────────────────────────────
- b build  i install  n run  d device  v variant  p package  L levels  f filter  x exclude  w export  H history  m scrcpy  q quit
-```
 
 **Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while `byedroid` drives the device.
 
@@ -57,20 +44,8 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 Binary name: **`bd`**
 
 ```bash
-# Homebrew
-brew install cesarferreira/tap/byedroid
-
 # Cargo / crates.io (installs to ~/.cargo/bin)
 cargo install byedroid
-
-# From source in this repo
-make install
-
-# User-local from source (installs to ~/.local/bin)
-make install-user
-
-# System-wide from source (installs to /usr/local/bin, requires sudo)
-make install-system
 ```
 
 To uninstall the crates.io install: `cargo uninstall byedroid`.

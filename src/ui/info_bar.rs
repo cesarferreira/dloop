@@ -189,6 +189,16 @@ fn row2(app: &App) -> Paragraph<'static> {
         ));
     }
 
+    spans.push(sep());
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("lvl  ", Style::default().fg(DIM)));
+    spans.push(Span::styled(
+        app.current_level_filter_summary(),
+        Style::default()
+            .fg(Color::Rgb(244, 162, 97))
+            .add_modifier(Modifier::BOLD),
+    ));
+
     if app.devices.len() > 1 {
         spans.push(sep());
         spans.push(Span::raw("  "));

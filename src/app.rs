@@ -19,8 +19,9 @@ use crate::modules::config::save_global_config;
 use crate::modules::config::MergedConfig;
 use crate::modules::device::scan_devices;
 use crate::modules::logcat::{
-    clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude, parse_log_line,
-    refresh_pids_for_packages, spawn_logcat_reader, CrashEvent, LogEntry, LogcatFilter,
+    clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude, matches_level_filter,
+    parse_log_line, refresh_pids_for_packages, spawn_logcat_reader, CrashEvent, LogEntry,
+    LogcatFilter,
 };
 use crate::modules::mirror::launch_scrcpy;
 use crate::modules::project::{infer_project, ProjectInference};
@@ -159,6 +160,70 @@ pub struct BuildRecord {
     pub finished_at: Instant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelFilterMode {
+    ConfigDefault,
+    All,
+    ErrorsOnly,
+    WarningsPlus,
+    InfoPlus,
+    DebugPlus,
+    Verbose,
+    FatalOnly,
+}
+
+impl LevelFilterMode {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::ConfigDefault => "Config default",
+            Self::All => "All levels",
+            Self::ErrorsOnly => "Errors only",
+            Self::WarningsPlus => "Warnings + Errors",
+            Self::InfoPlus => "Info + Warnings + Errors",
+            Self::DebugPlus => "Debug +",
+            Self::Verbose => "Verbose",
+            Self::FatalOnly => "Fatal only",
+        }
+    }
+
+    fn summary(self) -> &'static str {
+        match self {
+            Self::ConfigDefault => "config",
+            Self::All => "all",
+            Self::ErrorsOnly => "errors",
+            Self::WarningsPlus => "warn+",
+            Self::InfoPlus => "info+",
+            Self::DebugPlus => "debug+",
+            Self::Verbose => "verbose",
+            Self::FatalOnly => "fatal",
+        }
+    }
+
+    fn levels(self) -> Option<&'static str> {
+        match self {
+            Self::ConfigDefault => None,
+            Self::All => Some(""),
+            Self::ErrorsOnly => Some("E,F"),
+            Self::WarningsPlus => Some("W,E,F"),
+            Self::InfoPlus => Some("I,W,E,F"),
+            Self::DebugPlus => Some("D,I,W,E,F"),
+            Self::Verbose => Some("V,D,I,W,E,F"),
+            Self::FatalOnly => Some("F"),
+        }
+    }
+}
+
+pub const LEVEL_FILTER_OPTIONS: &[LevelFilterMode] = &[
+    LevelFilterMode::ConfigDefault,
+    LevelFilterMode::All,
+    LevelFilterMode::ErrorsOnly,
+    LevelFilterMode::WarningsPlus,
+    LevelFilterMode::InfoPlus,
+    LevelFilterMode::DebugPlus,
+    LevelFilterMode::Verbose,
+    LevelFilterMode::FatalOnly,
+];
+
 pub struct App {
     pub adb: AdbClient,
     pub project_root: PathBuf,
@@ -186,6 +251,9 @@ pub struct App {
     pub package_picker_cursor: usize,
     /// `None` = show all; `Some(pkg)` = filter to this package only
     pub active_package_filter: Option<String>,
+    pub level_picker_open: bool,
+    pub level_picker_cursor: usize,
+    pub level_filter_mode: LevelFilterMode,
 
     pub logcat_child: Option<Child>,
     pub logcat_running: bool,
@@ -258,6 +326,9 @@ impl App {
         if self.exclude_focused {
             return Modal::ExcludeFilter;
         }
+        if self.level_picker_open {
+            return Modal::LevelPicker;
+        }
         if self.picker_open {
             return Modal::VariantPicker;
         }
@@ -290,6 +361,9 @@ impl App {
 
     /// Whether the log pane should show this line (content + exclude), independent of ingest filter.
     pub fn pane_shows_entry(&self, entry: &LogEntry) -> bool {
+        if !matches_level_filter(self.effective_log_levels().as_deref(), &entry.level) {
+            return false;
+        }
         if !self.filter_input.is_empty() {
             let hay = format!("{} {} {}", entry.tag, entry.level, entry.message).to_lowercase();
             if !hay.contains(&self.filter_input.to_lowercase()) {
@@ -320,6 +394,29 @@ impl App {
             &self.inference.application_ids,
             &self.installed_device_packages,
         )
+    }
+
+    pub fn current_level_filter_summary(&self) -> String {
+        match self.level_filter_mode {
+            LevelFilterMode::ConfigDefault => self
+                .effective_log_levels()
+                .map(|levels| format!("cfg {levels}"))
+                .unwrap_or_else(|| "all".to_string()),
+            mode => mode.summary().to_string(),
+        }
+    }
+
+    pub fn current_level_filter_label(&self) -> String {
+        match self.level_filter_mode {
+            LevelFilterMode::ConfigDefault => self
+                .effective_log_levels()
+                .map(|levels| format!("Config default ({levels})"))
+                .unwrap_or_else(|| "Config default (all levels)".to_string()),
+            mode => match mode.levels() {
+                Some(levels) if !levels.is_empty() => format!("{} ({levels})", mode.title()),
+                _ => mode.title().to_string(),
+            },
+        }
     }
 }
 
@@ -368,6 +465,9 @@ impl App {
             package_picker_input: String::new(),
             package_picker_cursor: 0,
             active_package_filter: None,
+            level_picker_open: false,
+            level_picker_cursor: 0,
+            level_filter_mode: LevelFilterMode::ConfigDefault,
             logcat_child: None,
             logcat_running: false,
             logcat_paused: false,
@@ -685,12 +785,7 @@ impl App {
     }
 
     fn current_log_filter(&self) -> LogcatFilter {
-        let level = self
-            .config
-            .project
-            .log_level
-            .clone()
-            .or_else(|| self.config.global.default_log_level.clone());
+        let level = self.effective_log_levels();
         let content = if !self.filter_input.is_empty() {
             Some(self.filter_input.clone())
         } else {
@@ -709,6 +804,25 @@ impl App {
             levels: level,
             content,
             exclude_substrings,
+        }
+    }
+
+    fn effective_log_levels(&self) -> Option<String> {
+        match self.level_filter_mode {
+            LevelFilterMode::ConfigDefault => self
+                .config
+                .project
+                .log_level
+                .clone()
+                .or_else(|| self.config.global.default_log_level.clone()),
+            mode => {
+                let levels = mode.levels().unwrap_or("");
+                if levels.is_empty() {
+                    None
+                } else {
+                    Some(levels.to_string())
+                }
+            }
         }
     }
 
@@ -982,6 +1096,7 @@ impl App {
             Action::ConfirmNo => {
                 self.filter_focused = false;
                 self.exclude_focused = false;
+                self.level_picker_open = false;
                 self.picker_open = false;
                 self.device_picker_open = false;
                 self.crash_detail_open = false;
@@ -1002,6 +1117,13 @@ impl App {
                     "package filter"
                 };
                 self.show_toast(format!("Logcat: {mode}"));
+            }
+            Action::OpenLevelPicker => {
+                self.level_picker_open = true;
+                self.level_picker_cursor = LEVEL_FILTER_OPTIONS
+                    .iter()
+                    .position(|mode| *mode == self.level_filter_mode)
+                    .unwrap_or(0);
             }
             Action::ScrollUp => {
                 if self.build_history_open {
@@ -1081,6 +1203,9 @@ impl App {
                 if self.build_history_open {
                     let max = self.build_history.len().saturating_sub(1);
                     self.build_history_scroll = (self.build_history_scroll + 1).min(max);
+                } else if self.level_picker_open {
+                    self.level_picker_cursor =
+                        (self.level_picker_cursor + 1) % LEVEL_FILTER_OPTIONS.len();
                 } else if self.device_picker_open {
                     if !self.devices.is_empty() {
                         self.device_picker_cursor =
@@ -1099,6 +1224,12 @@ impl App {
             Action::PickerPrev => {
                 if self.build_history_open {
                     self.build_history_scroll = self.build_history_scroll.saturating_sub(1);
+                } else if self.level_picker_open {
+                    self.level_picker_cursor = if self.level_picker_cursor == 0 {
+                        LEVEL_FILTER_OPTIONS.len() - 1
+                    } else {
+                        self.level_picker_cursor - 1
+                    };
                 } else if self.device_picker_open {
                     if !self.devices.is_empty() {
                         self.device_picker_cursor = if self.device_picker_cursor == 0 {
@@ -1136,6 +1267,13 @@ impl App {
                         let _ = self.start_logcat();
                     }
                     self.device_picker_open = false;
+                } else if self.level_picker_open {
+                    if let Some(mode) = LEVEL_FILTER_OPTIONS.get(self.level_picker_cursor).copied()
+                    {
+                        self.level_filter_mode = mode;
+                        self.show_toast(format!("Levels: {}", self.current_level_filter_label()));
+                    }
+                    self.level_picker_open = false;
                 } else if self.package_picker_open {
                     let filtered = self.filtered_package_list();
                     let has_custom_entry =
@@ -1174,6 +1312,7 @@ impl App {
                 }
             }
             Action::PickerCancel => {
+                self.level_picker_open = false;
                 self.picker_open = false;
                 self.device_picker_open = false;
                 self.crash_detail_open = false;
@@ -1485,8 +1624,8 @@ fn merge_known_packages(
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_known_packages, package_match_score, scroll_offset_to_entry, LogEntry,
-        PackageMatchScore,
+        merge_known_packages, package_match_score, scroll_offset_to_entry, LevelFilterMode,
+        LogEntry, PackageMatchScore,
     };
 
     fn entry(raw: &str) -> LogEntry {
@@ -1570,5 +1709,13 @@ mod tests {
         assert!(prefix < contains);
         assert!(contains < fuzzy);
         assert!(package_match_score("com.example.app", "wve").is_none());
+    }
+
+    #[test]
+    fn level_filter_mode_maps_to_expected_levels() {
+        assert_eq!(LevelFilterMode::ErrorsOnly.levels(), Some("E,F"));
+        assert_eq!(LevelFilterMode::WarningsPlus.levels(), Some("W,E,F"));
+        assert_eq!(LevelFilterMode::All.levels(), Some(""));
+        assert_eq!(LevelFilterMode::ConfigDefault.levels(), None);
     }
 }

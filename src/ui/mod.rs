@@ -4,6 +4,7 @@ mod build_pane;
 mod crash_detail;
 mod device_popup;
 mod info_bar;
+mod level_picker;
 mod logcat_pane;
 mod package_picker;
 mod picker_overlay;
@@ -45,6 +46,7 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
 
     // ── overlays (render on top) ──────────────────────────────────────────
     let any_popup = app.picker_open
+        || app.level_picker_open
         || app.device_picker_open
         || app.build_popup_open
         || app.package_picker_open
@@ -57,6 +59,9 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
 
     if app.picker_open {
         picker_overlay::render(f, app, area);
+    }
+    if app.level_picker_open {
+        level_picker::render(f, app, area);
     }
     if app.device_picker_open {
         device_popup::render(f, app, area);

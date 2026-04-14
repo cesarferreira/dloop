@@ -73,6 +73,7 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     spans.extend(c("p", "pkg filter", Color::Rgb(249, 226, 175)));
     spans.extend(c("e", "build log", Color::Rgb(137, 220, 235)));
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
+    spans.extend(c("L", "levels", Color::Rgb(244, 162, 97)));
     spans.extend(c("a", "all/pkg", Color::Rgb(249, 226, 175)));
     spans.extend(c("f", "filter", Color::Rgb(249, 226, 175)));
     spans.extend(c("x", "exclude", Color::Rgb(250, 179, 135)));

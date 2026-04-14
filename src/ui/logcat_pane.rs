@@ -25,6 +25,8 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         " Logcat  [EXCLUDE] "
     } else if app.filter_focused {
         " Logcat  [FILTER] "
+    } else if app.level_picker_open {
+        " Logcat  [LEVELS] "
     } else if paused {
         " Logcat  PAUSED "
     } else if scrolled {
@@ -35,6 +37,8 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
 
     let border_style = Style::default().fg(if app.exclude_focused {
         Color::Rgb(255, 150, 100)
+    } else if app.level_picker_open {
+        Color::Rgb(244, 162, 97)
     } else if app.filter_focused {
         Color::Cyan
     } else {
@@ -49,6 +53,18 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     f.render_widget(block, area);
 
     let mut header_lines: Vec<Line> = Vec::new();
+    let level_summary = app.current_level_filter_summary();
+    if level_summary != "all" {
+        header_lines.push(Line::from(vec![
+            Span::styled(" levels: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                level_summary,
+                Style::default()
+                    .fg(Color::Rgb(244, 162, 97))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
     if app.filter_focused || !app.filter_input.is_empty() {
         header_lines.push(if app.filter_focused {
             Line::from(vec![

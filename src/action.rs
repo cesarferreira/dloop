@@ -13,6 +13,7 @@ pub enum Action {
     ClearLogs,
     ToggleLogcatPause,
     TogglePackageFilter,
+    OpenLevelPicker,
     ScrollUp,
     ScrollDown,
     ScrollPageUp,

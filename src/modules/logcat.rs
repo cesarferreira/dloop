@@ -158,10 +158,8 @@ impl LogcatFilter {
                 return false;
             }
         }
-        if let Some(ref lv) = self.levels {
-            if !lv.is_empty() && !lv.split(',').any(|x| x.trim() == entry.level) {
-                return false;
-            }
+        if !matches_level_filter(self.levels.as_deref(), &entry.level) {
+            return false;
         }
         if let Some(ref c) = self.content {
             if !c.is_empty() {
@@ -181,6 +179,16 @@ impl LogcatFilter {
         }
         true
     }
+}
+
+pub fn matches_level_filter(levels: Option<&str>, level: &str) -> bool {
+    let Some(levels) = levels else {
+        return true;
+    };
+    if levels.is_empty() {
+        return true;
+    }
+    levels.split(',').any(|x| x.trim() == level)
 }
 
 pub fn spawn_logcat_reader(adb_path: &Path, device: &str, tx: Sender<String>) -> Result<Child> {
@@ -306,5 +314,13 @@ mod tests {
         assert!(!f.allows(&e, &[]));
         let ok = parse_log_line("02-03 15:44:41.704  2359  3654 I MyTag: hello").expect("parse");
         assert!(f.allows(&ok, &[]));
+    }
+
+    #[test]
+    fn level_filter_matches_expected_levels() {
+        assert!(matches_level_filter(None, "E"));
+        assert!(matches_level_filter(Some("E,F"), "E"));
+        assert!(matches_level_filter(Some("E,F"), "F"));
+        assert!(!matches_level_filter(Some("E,F"), "W"));
     }
 }

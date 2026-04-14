@@ -17,6 +17,7 @@ pub enum Modal {
     None,
     Filter,
     ExcludeFilter,
+    LevelPicker,
     VariantPicker,
     DevicePicker,
     BuildPopup,
@@ -37,7 +38,9 @@ pub fn poll_event(timeout: Duration, modal: Modal) -> std::io::Result<Option<App
             Ok(match modal {
                 Modal::Filter => map_filter(key.code, key.modifiers),
                 Modal::ExcludeFilter => map_exclude_filter(key.code, key.modifiers),
-                Modal::VariantPicker | Modal::DevicePicker => map_picker(key.code),
+                Modal::LevelPicker | Modal::VariantPicker | Modal::DevicePicker => {
+                    map_picker(key.code)
+                }
                 Modal::BuildPopup => map_build_popup(key.code),
                 Modal::PackagePicker => map_package_picker(key.code, key.modifiers),
                 Modal::BuildHistory => map_build_history(key.code),
@@ -164,7 +167,8 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::RunApp),
 
         // Logcat
-        KeyCode::Char('l') | KeyCode::Char('L') => Some(Action::ToggleLogcat),
+        KeyCode::Char('l') => Some(Action::ToggleLogcat),
+        KeyCode::Char('L') => Some(Action::OpenLevelPicker),
         KeyCode::Char('f') | KeyCode::Char('F') => Some(Action::FocusFilter),
         KeyCode::Char('x') | KeyCode::Char('X') => Some(Action::FocusExclude),
         KeyCode::Char('c') if !modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ClearLogs),

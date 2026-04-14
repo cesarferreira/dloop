@@ -17,7 +17,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 │                   │ 15:43:13  HealthViewModel      I   fleet_connection: true
 └───────────────────┘ 15:43:14  Analytics            D   Event: screen_view {screen=Home}
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
- b build  i install  n run  d device  v variant  f filter  x exclude  w export  H history  m scrcpy  q quit
+ b build  i install  n run  d device  v variant  p package  L levels  f filter  x exclude  w export  H history  m scrcpy  q quit
 ```
 
 **Build, install, run, filter logcat, catch crashes** — all without leaving the terminal. Close Android Studio, reclaim your CPU and memory, and let your AI agent drive the code while `byedroid` drives the device.
@@ -34,6 +34,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 - **Crash / ANR detection** — crash blocks get a red highlight; count in the info bar; `y` opens a **crash detail** popup with the full log and shortcuts to copy, paste-ready agent prompt, export to file, or search online
 - **Scrollable log** — scroll back through history with `↑`/`↓` or `j`/`k`, `End` to return to tail
 - **Filter + Exclude** — live text filter (`f`) across tag + message; exclude filter (`x`) and config `exclude_filters` to silence noisy tags
+- **Level picker** — `L` switches between all logs, errors only, warnings+, info+, debug+, verbose, or config default
 - **Export** — `w` writes the current filtered log to `byedroid-<timestamp>.log` in the project root
 - **scrcpy** — launch screen mirroring for the selected device (`m`)
 - **Per-project config** — `.byedroid.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
@@ -101,6 +102,7 @@ project's package(s) by default.
 | `d` | Device picker |
 | `p` | Package filter picker |
 | `l` | Toggle logcat on/off |
+| `L` | Open log level picker |
 | `a` | Toggle all-logs / package-filter mode |
 | `f` | Open/close **include** filter |
 | `x` | Open/close **exclude** filter |
@@ -119,6 +121,7 @@ project's package(s) by default.
 | `q` | Quit |
 
 In filter / exclude mode: type to edit, `Enter` to confirm, `Esc` to clear.
+In the level picker: `↑`/`↓` to move, `Enter` to apply, `Esc` to cancel.
 In pickers: `↑`/`↓` to move, `Enter` to select, `Esc` to cancel.
 In crash detail: `↑`/`↓` / `j`/`k` scroll the crash text; `PageUp`/`PageDown` page scroll; `c` / `a` / `w` / `s` as above; `Esc` or `q` closes.
 

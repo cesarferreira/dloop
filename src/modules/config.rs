@@ -86,7 +86,8 @@ fn global_config_paths() -> Option<(PathBuf, PathBuf)> {
 }
 
 pub fn load_global_config() -> Result<GlobalConfig> {
-    let (primary, legacy) = global_config_paths().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
+    let (primary, legacy) =
+        global_config_paths().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
     let path = if primary.exists() {
         primary
     } else if legacy.exists() {

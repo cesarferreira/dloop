@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub enum Commands {
     /// Generate `.byedroid.toml` from detected Gradle project settings
     Init,
+    /// Check external tools and project setup
+    Doctor,
 }
 
 #[derive(Parser, Debug)]
@@ -13,7 +15,7 @@ pub enum Commands {
 #[command(author, version, about = "ByeDroid TUI — Android dev cockpit", long_about = None)]
 pub struct Cli {
     /// Project directory (defaults to current directory)
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub project: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Option<Commands>,

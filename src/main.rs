@@ -26,6 +26,10 @@ fn main() -> Result<()> {
             modules::init::run_init(&project_root)?;
             return Ok(());
         }
+        Some(Commands::Doctor) => {
+            modules::doctor::run_doctor(&project_root)?;
+            return Ok(());
+        }
         None => {}
     }
 

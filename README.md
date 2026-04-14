@@ -38,6 +38,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 - **scrcpy** — launch screen mirroring for the selected device (`m`)
 - **Per-project config** — `.byedroid.toml` overrides for packages, tasks, log level, scrcpy args, exclude patterns
 - **`bd init`** — scaffold `.byedroid.toml` from Gradle inference in one command
+- **`bd doctor`** — check `adb`, Java, Gradle wrapper, Android project inference, SDK env, `scrcpy`, and connected devices
 
 ## Requirements
 
@@ -81,9 +82,12 @@ bd --project /path/to/my/android/app
 
 # Scaffold config without starting the TUI
 bd init
+
+# Check local toolchain and project setup
+bd doctor
 ```
 
-bd opens immediately. If a device is connected, logcat starts automatically and follows the
+`bd` opens immediately. If a device is connected, logcat starts automatically and follows the
 project's package(s) by default.
 
 ## Keybindings
@@ -120,7 +124,7 @@ In crash detail: `↑`/`↓` / `j`/`k` scroll the crash text; `PageUp`/`PageDown
 
 ## Gradle Inference
 
-bd reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
+`bd` reads `app/build.gradle` (or `.kts`) on startup and infers everything it can:
 
 ```groovy
 android {

@@ -39,7 +39,7 @@ build:
 	cargo build --release
 
 test:
-	cargo test
+	cargo nextest run
 
 clippy:
 	cargo clippy --all-targets

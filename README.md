@@ -1,5 +1,7 @@
 # byedroid
 
+![ByeDroid screenshot](assets/screnshot.png)
+
 > Bye, Android Studio.
 
 > You don't need Android Studio eating 4 GB of RAM just to read logcat and tap "Run".
@@ -58,17 +60,22 @@ Binary name: **`bd`**
 # Homebrew
 brew install cesarferreira/tap/byedroid
 
-# Cargo (installs to ~/.cargo/bin)
+# Cargo / crates.io (installs to ~/.cargo/bin)
+cargo install byedroid
+
+# From source in this repo
 make install
 
-# User-local (installs to ~/.local/bin)
+# User-local from source (installs to ~/.local/bin)
 make install-user
 
-# System-wide (installs to /usr/local/bin, requires sudo)
+# System-wide from source (installs to /usr/local/bin, requires sudo)
 make install-system
 ```
 
-To uninstall: `make uninstall`, `make uninstall-user`, or `make uninstall-system`.
+To uninstall the crates.io install: `cargo uninstall byedroid`.
+
+To uninstall source installs: `make uninstall`, `make uninstall-user`, or `make uninstall-system`.
 
 Release tarballs and checksums for Homebrew: `make release`.
 

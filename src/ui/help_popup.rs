@@ -47,7 +47,7 @@ pub fn render(f: &mut Frame<'_>, _app: &App, area: Rect) {
         section("BUILD"),
         row("b", "build", Color::Rgb(137, 180, 250)),
         row("i", "install", Color::Rgb(245, 194, 231)),
-        row("n", "run (install + launch)", Color::Rgb(166, 227, 161)),
+        row("r", "run (install + launch)", Color::Rgb(166, 227, 161)),
         row("s", "stop", Color::Rgb(243, 139, 168)),
         row("e", "build log", Color::Rgb(137, 220, 235)),
         row("H", "build history", Color::Rgb(180, 190, 254)),

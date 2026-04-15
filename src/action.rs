@@ -2,8 +2,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
-    // Global
-    RefreshDevices,
     // Logcat
     ToggleLogcat,
     FocusFilter,

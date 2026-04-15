@@ -1112,16 +1112,6 @@ impl App {
     fn handle_action(&mut self, action: Action) -> Result<bool> {
         match action {
             Action::Quit => return Ok(true),
-            Action::RefreshDevices => {
-                if let Err(e) = self.refresh_devices() {
-                    self.show_toast(format!("devices: {e}"));
-                } else {
-                    if self.logcat_running {
-                        self.stop_logcat();
-                        let _ = self.start_logcat();
-                    }
-                }
-            }
             Action::ToggleLogcat => {
                 if self.logcat_running {
                     self.stop_logcat();

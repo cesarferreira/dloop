@@ -174,7 +174,9 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::InstallDebug)
         }
-        KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::RunApp),
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('r') | KeyCode::Char('R') => {
+            Some(Action::RunApp)
+        }
 
         // Logcat
         KeyCode::Char('l') => Some(Action::ToggleLogcat),
@@ -197,7 +199,8 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('s') if !modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::StopProcess)
         }
-        KeyCode::Char('r') => Some(Action::RefreshDevices),
+        // r/R and n/N both trigger RunApp (see above); no explicit refresh binding needed
+        // since device detection is automatic.
         KeyCode::Char('w') | KeyCode::Char('W') => Some(Action::ExportLogs),
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::OpenCrashDetail),
         KeyCode::Char('?') => Some(Action::OpenHelp),

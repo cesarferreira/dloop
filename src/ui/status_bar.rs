@@ -67,7 +67,7 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(c("b", "build", Color::Rgb(137, 180, 250)));
     spans.extend(c("i", "install", Color::Rgb(245, 194, 231)));
-    spans.extend(c("n", "run", Color::Rgb(166, 227, 161)));
+    spans.extend(c("r", "run", Color::Rgb(166, 227, 161)));
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
     spans.extend(c("q", "quit", Color::Rgb(148, 226, 213)));
     spans.extend(c("?", "help", Color::Rgb(249, 226, 175)));

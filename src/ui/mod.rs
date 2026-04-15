@@ -19,7 +19,7 @@ use ratatui::Frame;
 use crate::app::App;
 
 /// Height of the top info bar in rows.
-const INFO_H: u16 = 3;
+const INFO_H: u16 = 2;
 
 pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let area = f.area();

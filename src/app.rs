@@ -1035,10 +1035,6 @@ impl App {
             self.show_toast("Already running (s to stop)");
             return Ok(());
         }
-        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
-            self.show_toast("No device selected");
-            return Ok(());
-        };
         let gradlew = match find_gradlew(&self.project_root) {
             Some(g) => g,
             None => {
@@ -1046,18 +1042,16 @@ impl App {
                 return Ok(());
             }
         };
-        let assemble = self.effective_assemble.clone();
-        let display = format!("clean {assemble}");
         self.build_lines.clear();
         let spawn = spawn_gradle(
             &gradlew,
             &self.project_root,
-            &["clean", assemble.as_str()],
-            Some(serial.as_str()),
+            &["clean"],
+            None,
             self.tx_build.clone(),
         )?;
         self.build_child = Some(spawn.child);
-        self.build_task = Some(display);
+        self.build_task = Some("clean".to_string());
         self.build_start = Some(Instant::now());
         self.build_popup_open = true;
         self.build_popup_scroll = 0;

@@ -25,6 +25,7 @@ pub enum Action {
     CrashSearch,
     // Build
     BuildDebug,
+    CleanBuild,
     InstallDebug,
     RunApp,
     // Popups

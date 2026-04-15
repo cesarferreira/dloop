@@ -1017,12 +1017,47 @@ impl App {
         let spawn = spawn_gradle(
             &gradlew,
             &self.project_root,
-            task,
+            &[task],
             Some(serial.as_str()),
             self.tx_build.clone(),
         )?;
         self.build_child = Some(spawn.child);
         self.build_task = Some(task.to_string());
+        self.build_start = Some(Instant::now());
+        self.build_popup_open = true;
+        self.build_popup_scroll = 0;
+        self.build_popup_auto_close = None;
+        Ok(())
+    }
+
+    pub fn run_clean_build(&mut self) -> Result<()> {
+        if self.build_child.is_some() {
+            self.show_toast("Already running (s to stop)");
+            return Ok(());
+        }
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.show_toast("No device selected");
+            return Ok(());
+        };
+        let gradlew = match find_gradlew(&self.project_root) {
+            Some(g) => g,
+            None => {
+                self.show_toast("gradlew not found in project root");
+                return Ok(());
+            }
+        };
+        let assemble = self.effective_assemble.clone();
+        let display = format!("clean {assemble}");
+        self.build_lines.clear();
+        let spawn = spawn_gradle(
+            &gradlew,
+            &self.project_root,
+            &["clean", assemble.as_str()],
+            Some(serial.as_str()),
+            self.tx_build.clone(),
+        )?;
+        self.build_child = Some(spawn.child);
+        self.build_task = Some(display);
         self.build_start = Some(Instant::now());
         self.build_popup_open = true;
         self.build_popup_scroll = 0;
@@ -1494,6 +1529,12 @@ impl App {
                 let task = self.effective_assemble.clone();
                 if let Err(e) = self.run_build_task(&task) {
                     self.show_toast(format!("build: {e}"));
+                }
+            }
+            Action::CleanBuild => {
+                self.launch_after_build = false;
+                if let Err(e) = self.run_clean_build() {
+                    self.show_toast(format!("clean build: {e}"));
                 }
             }
             Action::InstallDebug => {

@@ -25,13 +25,13 @@ pub struct GradleSpawn {
 pub fn spawn_gradle(
     gradlew: &Path,
     project_root: &Path,
-    task: &str,
+    tasks: &[&str],
     android_serial: Option<&str>,
     tx: Sender<String>,
 ) -> Result<GradleSpawn> {
     let mut cmd = Command::new(gradlew);
     cmd.current_dir(project_root);
-    cmd.arg(task);
+    cmd.args(tasks);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     if let Some(s) = android_serial {

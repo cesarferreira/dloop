@@ -171,6 +171,7 @@ fn map_normal(code: KeyCode, modifiers: KeyModifiers) -> Option<AppEvent> {
         KeyCode::Char('b') if !modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::BuildDebug)
         }
+        KeyCode::Char('B') => Some(Action::CleanBuild),
         KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::InstallDebug)
         }

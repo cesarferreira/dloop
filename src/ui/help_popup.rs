@@ -46,6 +46,7 @@ pub fn render(f: &mut Frame<'_>, _app: &App, area: Rect) {
     let lines: Vec<Line> = vec![
         section("BUILD"),
         row("b", "build", Color::Rgb(137, 180, 250)),
+        row("B", "clean build", Color::Rgb(137, 180, 250)),
         row("i", "install", Color::Rgb(245, 194, 231)),
         row("r", "run (install + launch)", Color::Rgb(166, 227, 161)),
         row("s", "stop", Color::Rgb(243, 139, 168)),

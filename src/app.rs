@@ -15,8 +15,7 @@ use crate::action::Action;
 use crate::adb::{AdbClient, Device};
 use crate::event::{poll_event, AppEvent, Modal};
 use crate::modules::build::{find_gradlew, spawn_gradle};
-use crate::modules::config::save_global_config;
-use crate::modules::config::MergedConfig;
+use crate::modules::config::{save_global_config, save_project_config, MergedConfig};
 use crate::modules::device::scan_devices;
 use crate::modules::logcat::{
     clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude, matches_level_filter,
@@ -1502,6 +1501,7 @@ impl App {
                     {
                         self.effective_assemble = a;
                         self.effective_install = i;
+                        self.persist_variant();
                         self.show_toast(format!("Variant: {label}"));
                     }
                     self.picker_open = false;
@@ -1575,6 +1575,12 @@ impl App {
             self.config.global.preferred_device_serial = Some(s.to_string());
             let _ = save_global_config(&self.config.global);
         }
+    }
+
+    fn persist_variant(&mut self) {
+        self.config.project.assemble_task = Some(self.effective_assemble.clone());
+        self.config.project.install_task = Some(self.effective_install.clone());
+        let _ = save_project_config(&self.project_root, &self.config.project);
     }
 
     fn tick_pid_refresh(&mut self) {

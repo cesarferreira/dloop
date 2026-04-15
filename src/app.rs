@@ -1049,6 +1049,87 @@ impl App {
         }
     }
 
+    /// Resolve the target package: picker selection → last built APK → first configured package.
+    fn resolve_target_package(&self) -> Option<String> {
+        if let Some(ref pkg) = self.active_package_filter {
+            return Some(pkg.clone());
+        }
+        if let Some(pkg) = self.read_built_package_id() {
+            return Some(pkg);
+        }
+        self.effective_packages.first().cloned()
+    }
+
+    fn uninstall_app(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.show_toast("No device selected");
+            return;
+        };
+        let Some(package) = self.resolve_target_package() else {
+            self.show_toast("No package known — can't uninstall");
+            return;
+        };
+        let result = std::process::Command::new(&self.adb.adb_path)
+            .args(["-s", &serial, "uninstall", &package])
+            .output();
+        match result {
+            Ok(out) if out.status.success() => self.show_toast(format!("Uninstalled {package}")),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                self.show_toast(format!("Uninstall failed: {stderr}"));
+            }
+            Err(e) => self.show_toast(format!("Uninstall error: {e}")),
+        }
+    }
+
+    fn clear_app_data(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.show_toast("No device selected");
+            return;
+        };
+        let Some(package) = self.resolve_target_package() else {
+            self.show_toast("No package known — can't clear data");
+            return;
+        };
+        let result = std::process::Command::new(&self.adb.adb_path)
+            .args(["-s", &serial, "shell", "pm", "clear", &package])
+            .output();
+        match result {
+            Ok(out) if out.status.success() => {
+                self.show_toast(format!("Cleared all data for {package}"));
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                self.show_toast(format!("Clear data failed: {stderr}"));
+            }
+            Err(e) => self.show_toast(format!("Clear data error: {e}")),
+        }
+    }
+
+    fn clear_app_cache(&mut self) {
+        let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
+            self.show_toast("No device selected");
+            return;
+        };
+        let Some(package) = self.resolve_target_package() else {
+            self.show_toast("No package known — can't clear cache");
+            return;
+        };
+        let result = std::process::Command::new(&self.adb.adb_path)
+            .args(["-s", &serial, "shell", "pm", "clear", "--cache-only", &package])
+            .output();
+        match result {
+            Ok(out) if out.status.success() => {
+                self.show_toast(format!("Cleared cache for {package}"));
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                self.show_toast(format!("Clear cache failed: {stderr}"));
+            }
+            Err(e) => self.show_toast(format!("Clear cache error: {e}")),
+        }
+    }
+
     fn launch_app(&mut self) {
         let Some(serial) = self.selected_serial().map(|s| s.to_string()) else {
             return;
@@ -1059,18 +1140,11 @@ impl App {
         //              (this is exactly what Android Studio does; it always matches the
         //              installed variant rather than the base/prod package ID).
         // Priority 3 — fall back to the first inferred package.
-        let package = if let Some(ref pkg) = self.active_package_filter {
-            pkg.clone()
-        } else if let Some(pkg) = self.read_built_package_id() {
+        let package = if let Some(pkg) = self.resolve_target_package() {
             pkg
         } else {
-            match self.effective_packages.first() {
-                Some(p) => p.clone(),
-                None => {
-                    self.show_toast("No package known — can't launch");
-                    return;
-                }
-            }
+            self.show_toast("No package known — can't launch");
+            return;
         };
         // `monkey -p <pkg> -c android.intent.category.LAUNCHER 1` reliably starts the app.
         let result = std::process::Command::new(&self.adb.adb_path)
@@ -1442,6 +1516,9 @@ impl App {
                 self.stop_build();
                 self.stop_logcat();
             }
+            Action::UninstallApp => self.uninstall_app(),
+            Action::ClearAppData => self.clear_app_data(),
+            Action::ClearAppCache => self.clear_app_cache(),
             Action::LaunchScrcpy => {
                 let Some(serial) = self.selected_serial() else {
                     self.show_toast("No device");

@@ -38,6 +38,10 @@ pub enum Action {
     PickerPrev,
     PickerConfirm,
     PickerCancel,
+    // App management
+    UninstallApp,
+    ClearAppData,
+    ClearAppCache,
     // Misc
     LaunchScrcpy,
     StopProcess,

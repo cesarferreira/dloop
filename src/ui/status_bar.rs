@@ -69,6 +69,7 @@ pub fn render(f: &mut Frame<'_>, app: &App, area: Rect) {
     spans.extend(c("i", "install", Color::Rgb(245, 194, 231)));
     spans.extend(c("r", "run", Color::Rgb(166, 227, 161)));
     spans.extend(c("l", "logcat", Color::Rgb(203, 166, 247)));
+    spans.extend(c("y", "last crash/ANR popup", Color::Rgb(243, 188, 219)));
     spans.extend(c("q", "quit", Color::Rgb(148, 226, 213)));
     spans.extend(c("?", "help", Color::Rgb(249, 226, 175)));
 

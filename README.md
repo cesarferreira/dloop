@@ -89,7 +89,7 @@ project's package(s) by default.
 | `f` | Open/close **include** filter |
 | `x` | Open/close **exclude** filter |
 | `w` | Export visible log lines to `byedroid-<timestamp>.log` |
-| `y` | Open **crash details** for the last crash, jump the log pane to that crash, then use `c` copy, `a` agent prompt to clipboard, `w` export to `crash-<timestamp>.log`, `s` Google search, `Esc` close |
+| `y` | Open **crash/ANR details** for the last captured crash, jump the log pane to that crash, then use `c` copy, `a` agent prompt to clipboard, `w` export to `crash-<timestamp>.log`, `s` Google search, `Esc` close. This does not open generic error-level log lines. |
 | `H` / `h` | Open/close build history overlay |
 | `Space` | Pause / resume log streaming |
 | `↑` / `↓` / `j` / `k` | Scroll logcat |

@@ -73,7 +73,7 @@ pub fn render(f: &mut Frame<'_>, _app: &App, area: Rect) {
         row("v", "build variant", Color::Rgb(180, 190, 254)),
         row("p", "package filter", Color::Rgb(249, 226, 175)),
         row("m", "scrcpy mirror", Color::Rgb(180, 190, 254)),
-        row("y", "crash details", Color::Rgb(243, 188, 219)),
+        row("y", "last crash/ANR details", Color::Rgb(243, 188, 219)),
         row("q", "quit", Color::Rgb(148, 226, 213)),
     ];
 

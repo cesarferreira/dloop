@@ -200,6 +200,11 @@ where
     }
     None
 }
+
+fn missing_crash_message() -> &'static str {
+    "no crash/ANR captured yet; `y` does not open generic error logs"
+}
+
 use crate::tui::restore_terminal;
 use crate::ui;
 
@@ -769,7 +774,7 @@ impl App {
 
     fn yank_last_crash(&mut self) -> Result<(), String> {
         let Some(crash) = self.crash_events.last() else {
-            return Err("no crash captured yet".to_string());
+            return Err(missing_crash_message().to_string());
         };
         let text = Self::format_crash_text(crash);
         copy_to_clipboard(&text).map_err(|e| e.to_string())?;
@@ -809,7 +814,7 @@ impl App {
 
     fn export_crash_to_file(&mut self) -> std::io::Result<()> {
         let Some(crash) = self.crash_events.last() else {
-            return Err(std::io::Error::other("no crash captured yet"));
+            return Err(std::io::Error::other(missing_crash_message()));
         };
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -824,7 +829,7 @@ impl App {
 
     fn search_crash_online(&mut self) -> std::io::Result<()> {
         let Some(crash) = self.crash_events.last() else {
-            return Err(std::io::Error::other("no crash captured yet"));
+            return Err(std::io::Error::other(missing_crash_message()));
         };
         let q = format!("{} {}", crash.summary, crash.timestamp);
         let encoded = url_encode_query(&q);
@@ -1248,7 +1253,7 @@ impl App {
             }
             Action::OpenCrashDetail => {
                 if self.crash_events.is_empty() {
-                    self.show_toast("no crash captured yet");
+                    self.show_toast(missing_crash_message());
                 } else {
                     self.open_last_crash_detail();
                 }
@@ -1262,7 +1267,7 @@ impl App {
             }
             Action::CrashAgent => {
                 let Some(crash) = self.crash_events.last() else {
-                    self.show_toast("no crash captured yet");
+                    self.show_toast(missing_crash_message());
                     return Ok(false);
                 };
                 let body = Self::format_crash_text(crash);
@@ -1838,8 +1843,9 @@ fn merge_known_packages(
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_known_packages, package_match_score, preferred_device_index, scroll_offset_to_entry,
-        Device, LevelFilterMode, LogEntry, PackageMatchScore,
+        merge_known_packages, missing_crash_message, package_match_score,
+        preferred_device_index, scroll_offset_to_entry, Device, LevelFilterMode, LogEntry,
+        PackageMatchScore,
     };
 
     fn entry(raw: &str) -> LogEntry {
@@ -1955,5 +1961,12 @@ mod tests {
             1
         );
         assert_eq!(preferred_device_index(&devices, None, None, 0), 0);
+    }
+
+    #[test]
+    fn missing_crash_message_explains_y_scope() {
+        let msg = missing_crash_message();
+        assert!(msg.contains("crash/ANR"));
+        assert!(msg.contains("generic error logs"));
     }
 }

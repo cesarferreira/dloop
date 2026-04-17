@@ -18,6 +18,11 @@ pub struct LogEntry {
     pub message: String,
     /// First line of a detected crash / ANR block (for UI highlight).
     pub crash_start: bool,
+    /// Pre-computed flag for stack trace detection (performance optimization).
+    pub is_stack_trace: bool,
+    /// Pre-computed searchable content (tag + level + message + raw, lowercased).
+    /// Used for filter and exclude matching to avoid repeated allocations.
+    pub cached_search_text: String,
 }
 
 /// Parse standard `logcat -v time` line.
@@ -49,6 +54,11 @@ pub fn parse_log_line(line: &str) -> Option<LogEntry> {
         (tag_and_message.clone(), String::new())
     };
 
+    let is_stack_trace = looks_like_stack_trace(&message) || looks_like_stack_trace(line);
+
+    // Pre-compute searchable content once (huge perf win)
+    let cached_search_text = format!("{} {} {} {}", tag, level, message, line).to_lowercase();
+
     Some(LogEntry {
         raw: line.to_string(),
         timestamp,
@@ -57,6 +67,8 @@ pub fn parse_log_line(line: &str) -> Option<LogEntry> {
         level,
         message,
         crash_start: false,
+        is_stack_trace,
+        cached_search_text,
     })
 }
 
@@ -278,6 +290,16 @@ pub fn matches_any_exclude(excludes: &[String], entry: &LogEntry) -> bool {
     excludes
         .iter()
         .any(|e| !e.is_empty() && hay.contains(&e.to_lowercase()))
+}
+
+/// Optimized version using cached search text to avoid string allocations.
+pub fn matches_any_exclude_with_cached(excludes: &[String], entry: &LogEntry) -> bool {
+    if excludes.is_empty() {
+        return false;
+    }
+    excludes
+        .iter()
+        .any(|e| !e.is_empty() && entry.cached_search_text.contains(&e.to_lowercase()))
 }
 
 pub fn looks_like_stack_trace(line: &str) -> bool {

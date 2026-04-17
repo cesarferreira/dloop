@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::modules::logcat::{level_style, looks_like_stack_trace, tag_color};
+use crate::modules::logcat::{level_style, tag_color};
 
 const TAG_WIDTH: usize = 23;
 const TS_WIDTH: usize = 12;
@@ -30,7 +30,11 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     } else if paused {
         " Logcat  PAUSED "
     } else if scrolled {
-        " Logcat  ↑scrolled — End to tail "
+        if app.new_lines_while_scrolled > 0 {
+            &format!(" Logcat  ↑{} new lines — End to jump to bottom ", app.new_lines_while_scrolled)
+        } else {
+            " Logcat  ↑scrolled — End to tail "
+        }
     } else {
         " Logcat "
     };
@@ -107,12 +111,36 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         });
     }
 
+    // New lines notification when scrolled up
+    if scrolled && app.new_lines_while_scrolled > 0 {
+        header_lines.push(Line::from(vec![
+            Span::styled(" ▼ ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                format!("{} new lines at bottom", app.new_lines_while_scrolled),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" — Press ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "End",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to jump", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
     let header_h = header_lines.len() as u16;
     let visible_rows = inner.height.saturating_sub(header_h).max(1) as usize;
     let msg_width = (inner.width as usize).saturating_sub(PREFIX_WIDTH).max(20);
 
     let total = app.log_lines.len();
     let scroll = app.log_scroll.min(total.saturating_sub(visible_rows));
+
+    // Pre-compute exclude substrings once instead of for every entry
+    let exclude_substrings = app.merged_exclude_substrings();
 
     let mut collected: Vec<Line> = Vec::new();
     let mut last_tag = String::new();
@@ -122,7 +150,7 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         if collected.len() >= visible_rows * 3 {
             break;
         }
-        if !app.pane_shows_entry(entry) {
+        if !app.pane_shows_entry_with_excludes(entry, &exclude_substrings) {
             continue;
         }
         if skipped < scroll {
@@ -132,7 +160,7 @@ pub fn render(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         let lc = &entry.level;
         let lvl_color = level_style(lc);
         let tc = tag_color(&entry.tag, &mut app.tag_color_cache);
-        let is_stack = looks_like_stack_trace(&entry.message) || looks_like_stack_trace(&entry.raw);
+        let is_stack = entry.is_stack_trace;
         let crash_bg = entry.crash_start;
         let msg_fg = if crash_bg {
             Color::Rgb(255, 200, 200)

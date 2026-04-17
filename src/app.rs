@@ -18,7 +18,7 @@ use crate::modules::build::{find_gradlew, spawn_gradle};
 use crate::modules::config::{save_global_config, save_project_config, MergedConfig};
 use crate::modules::device::scan_devices;
 use crate::modules::logcat::{
-    clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude, matches_level_filter,
+    clear_buffer, is_crash_continuation, is_crash_start, matches_any_exclude_with_cached, matches_level_filter,
     parse_log_line, refresh_pids_for_packages, spawn_logcat_reader, CrashEvent, LogEntry,
     LogcatFilter,
 };
@@ -328,6 +328,9 @@ pub struct App {
     pub exclude_input: String,
     pub exclude_focused: bool,
     pub tag_color_cache: HashMap<String, usize>,
+    // Performance: cached lowercase versions to avoid repeated allocations
+    cached_filter_lower: String,
+    cached_exclude_lower: String,
     pub package_pids: Vec<String>,
 
     pub crash_events: Vec<CrashEvent>,
@@ -370,6 +373,8 @@ pub struct App {
 
     /// How many lines from the bottom the logcat viewport is scrolled (0 = follow tail).
     pub log_scroll: usize,
+    /// Count of new log lines that arrived while user is scrolled up (for notification).
+    pub new_lines_while_scrolled: usize,
     /// When true, show ALL logcat lines (no package filter).
     pub show_all_logs: bool,
     /// When true, launch the app after the current build finishes successfully.
@@ -429,16 +434,20 @@ impl App {
 
     /// Whether the log pane should show this line (content + exclude), independent of ingest filter.
     pub fn pane_shows_entry(&self, entry: &LogEntry) -> bool {
+        self.pane_shows_entry_with_excludes(entry, &self.merged_exclude_substrings())
+    }
+
+    /// Optimized version that takes pre-computed exclude substrings to avoid repeated allocations.
+    pub fn pane_shows_entry_with_excludes(&self, entry: &LogEntry, exclude_substrings: &[String]) -> bool {
         if !matches_level_filter(self.effective_log_levels().as_deref(), &entry.level) {
             return false;
         }
-        if !self.filter_input.is_empty() {
-            let hay = format!("{} {} {}", entry.tag, entry.level, entry.message).to_lowercase();
-            if !hay.contains(&self.filter_input.to_lowercase()) {
+        if !self.cached_filter_lower.is_empty() {
+            if !entry.cached_search_text.contains(&self.cached_filter_lower) {
                 return false;
             }
         }
-        !matches_any_exclude(&self.merged_exclude_substrings(), entry)
+        !matches_any_exclude_with_cached(exclude_substrings, entry)
     }
 
     /// Filtered package list used for the package picker display.
@@ -548,6 +557,8 @@ impl App {
             exclude_input: String::new(),
             exclude_focused: false,
             tag_color_cache: HashMap::new(),
+            cached_filter_lower: String::new(),
+            cached_exclude_lower: String::new(),
             package_pids: Vec::new(),
             crash_events: Vec::new(),
             current_crash: None,
@@ -577,6 +588,7 @@ impl App {
             effective_assemble,
             effective_install,
             log_scroll: 0,
+            new_lines_while_scrolled: 0,
             show_all_logs,
             launch_after_build: false,
             picker_open: false,
@@ -860,14 +872,18 @@ impl App {
             } else if (line.starts_with("[adb logcat stderr]") || line.starts_with("[adb"))
                 && self.log_lines.len() < self.max_log_lines
             {
+                let message = line.clone();
+                let cached_search_text = format!("adb E {} {}", message, line).to_lowercase();
                 self.log_lines.push(LogEntry {
                     raw: line.clone(),
                     timestamp: String::new(),
                     pid: String::new(),
                     tag: "adb".into(),
                     level: "E".into(),
-                    message: line,
+                    message,
                     crash_start: false,
+                    is_stack_trace: false,
+                    cached_search_text,
                 });
                 got_new = true;
             }
@@ -876,6 +892,7 @@ impl App {
         // When scrolled, advance the offset so the viewport stays on the same lines.
         if got_new && self.log_scroll > 0 {
             self.log_scroll += 1; // keep same relative position as buffer grows
+            self.new_lines_while_scrolled += 1; // track new lines for notification
         }
         while let Ok(line) = self.rx_build.try_recv() {
             self.build_lines.push(line);
@@ -1334,7 +1351,7 @@ impl App {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_add(1);
                     self.build_popup_auto_close = None;
                 } else {
-                    self.log_scroll = self.log_scroll.saturating_add(1);
+                    self.log_scroll = self.log_scroll.saturating_add(5);
                 }
             }
             Action::ScrollDown => {
@@ -1347,7 +1364,10 @@ impl App {
                     self.build_popup_scroll = self.build_popup_scroll.saturating_sub(1);
                     self.build_popup_auto_close = None;
                 } else {
-                    self.log_scroll = self.log_scroll.saturating_sub(1);
+                    self.log_scroll = self.log_scroll.saturating_sub(5);
+                    if self.log_scroll == 0 {
+                        self.new_lines_while_scrolled = 0;
+                    }
                 }
             }
             Action::ScrollPageUp => {
@@ -1356,7 +1376,7 @@ impl App {
                 } else if self.crash_detail_open {
                     self.crash_detail_scroll = self.crash_detail_scroll.saturating_add(10);
                 } else {
-                    self.log_scroll = self.log_scroll.saturating_add(20);
+                    self.log_scroll = self.log_scroll.saturating_add(50);
                 }
             }
             Action::ScrollPageDown => {
@@ -1366,11 +1386,12 @@ impl App {
                 } else if self.crash_detail_open {
                     self.crash_detail_scroll = self.crash_detail_scroll.saturating_sub(10);
                 } else {
-                    self.log_scroll = self.log_scroll.saturating_sub(20);
+                    self.log_scroll = self.log_scroll.saturating_sub(50);
                 }
             }
             Action::ScrollTail => {
                 self.log_scroll = 0;
+                self.new_lines_while_scrolled = 0;
             }
             // ── popup opens ───────────────────────────────────────────────
             Action::OpenVariantPicker => {
@@ -1605,32 +1626,16 @@ impl App {
 }
 
 pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> Result<()> {
-    let tick = Duration::from_millis(50);
+    // Fast polling for responsive input (16ms = ~60fps)
+    let poll_timeout = Duration::from_millis(16);
+    let mut needs_redraw = true;
+    let mut last_tick = Instant::now();
+    let tick_interval = Duration::from_millis(250); // Slower background checks
+
     loop {
-        app.drain_channels();
-        app.poll_build_finished();
-        app.tick_device_refresh();
-        app.tick_git_refresh();
-        app.tick_pid_refresh();
-        app.tick_device_info_refresh();
-
-        if let Some((_, t)) = &app.toast {
-            if t.elapsed() > Duration::from_secs(4) {
-                app.toast = None;
-            }
-        }
-
-        // Auto-close the build popup after the countdown expires.
-        if let Some(deadline) = app.build_popup_auto_close {
-            if Instant::now() >= deadline {
-                app.build_popup_open = false;
-                app.build_popup_auto_close = None;
-            }
-        }
-
-        terminal.draw(|f| ui::draw(f, &mut app))?;
-
-        if let Some(ev) = poll_event(tick, app.active_modal())? {
+        // Fast: Always check for user input with low latency
+        let has_event = if let Some(ev) = poll_event(poll_timeout, app.active_modal())? {
+            needs_redraw = true; // User input always triggers redraw
             match ev {
                 AppEvent::Text(ch) => {
                     if app.package_picker_open {
@@ -1638,8 +1643,10 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
                         app.package_picker_cursor = 0;
                     } else if app.exclude_focused {
                         app.exclude_input.push(ch);
+                        app.cached_exclude_lower = app.exclude_input.to_lowercase();
                     } else {
                         app.filter_input.push(ch);
+                        app.cached_filter_lower = app.filter_input.to_lowercase();
                     }
                 }
                 AppEvent::Backspace => {
@@ -1648,8 +1655,10 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
                         app.package_picker_cursor = 0;
                     } else if app.exclude_focused {
                         app.exclude_input.pop();
+                        app.cached_exclude_lower = app.exclude_input.to_lowercase();
                     } else {
                         app.filter_input.pop();
+                        app.cached_filter_lower = app.filter_input.to_lowercase();
                     }
                 }
                 AppEvent::Action(a) => {
@@ -1658,6 +1667,45 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
                     }
                 }
             }
+            true
+        } else {
+            false
+        };
+
+        // Slower: Background tasks run periodically, not every frame
+        if last_tick.elapsed() >= tick_interval {
+            app.drain_channels();
+            needs_redraw = true; // New log lines need redraw
+
+            app.poll_build_finished();
+            app.tick_device_refresh();
+            app.tick_git_refresh();
+            app.tick_pid_refresh();
+            app.tick_device_info_refresh();
+
+            if let Some((_, t)) = &app.toast {
+                if t.elapsed() > Duration::from_secs(4) {
+                    app.toast = None;
+                    needs_redraw = true;
+                }
+            }
+
+            // Auto-close the build popup after the countdown expires.
+            if let Some(deadline) = app.build_popup_auto_close {
+                if Instant::now() >= deadline {
+                    app.build_popup_open = false;
+                    app.build_popup_auto_close = None;
+                    needs_redraw = true;
+                }
+            }
+
+            last_tick = Instant::now();
+        }
+
+        // Only redraw when something changed
+        if needs_redraw {
+            terminal.draw(|f| ui::draw(f, &mut app))?;
+            needs_redraw = false;
         }
     }
     app.finalize_crash();
@@ -1849,6 +1897,7 @@ mod tests {
     };
 
     fn entry(raw: &str) -> LogEntry {
+        let cached_search_text = format!("AndroidRuntime E {} {}", raw, raw).to_lowercase();
         LogEntry {
             raw: raw.to_string(),
             timestamp: "12:00:00.000".to_string(),
@@ -1857,6 +1906,8 @@ mod tests {
             level: "E".to_string(),
             message: raw.to_string(),
             crash_start: false,
+            is_stack_trace: false,
+            cached_search_text,
         }
     }
 

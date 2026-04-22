@@ -139,7 +139,7 @@ Use the variant picker (`v`) to switch at runtime, or override in `.byedroid.tom
 |------|---------|
 | `~/.config/byedroid/config.toml` | Global: preferred device serial, default log level |
 | `.byedroid.toml` | Per-project overrides |
-| `.loopcat.toml` or `.droid-loop.toml` | Legacy per-project overrides still supported |
+| `.droid-loop.toml` | Legacy per-project overrides still supported |
 
 **`.byedroid.toml` example:**
 

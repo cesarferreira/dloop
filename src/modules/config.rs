@@ -59,19 +59,15 @@ impl MergedConfig {
     }
 }
 
-/// Prefer `.byedroid.toml`, then fall back to legacy project config names.
+/// Prefer `.byedroid.toml`, then fall back to the remaining legacy project config name.
 fn project_config_path(project_root: &Path) -> Option<PathBuf> {
     let a = project_root.join(".byedroid.toml");
     if a.exists() {
         return Some(a);
     }
-    let b = project_root.join(".loopcat.toml");
+    let b = project_root.join(".droid-loop.toml");
     if b.exists() {
         return Some(b);
-    }
-    let c = project_root.join(".droid-loop.toml");
-    if c.exists() {
-        return Some(c);
     }
     None
 }

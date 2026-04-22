@@ -281,17 +281,6 @@ pub fn clear_buffer(adb: &AdbClient, device: &str) -> Result<()> {
     Ok(())
 }
 
-/// True if any exclude substring matches the log line (tag + message + raw).
-pub fn matches_any_exclude(excludes: &[String], entry: &LogEntry) -> bool {
-    if excludes.is_empty() {
-        return false;
-    }
-    let hay = format!("{} {} {}", entry.tag, entry.message, entry.raw).to_lowercase();
-    excludes
-        .iter()
-        .any(|e| !e.is_empty() && hay.contains(&e.to_lowercase()))
-}
-
 /// Optimized version using cached search text to avoid string allocations.
 pub fn matches_any_exclude_with_cached(excludes: &[String], entry: &LogEntry) -> bool {
     if excludes.is_empty() {

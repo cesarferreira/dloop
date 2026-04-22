@@ -1634,7 +1634,7 @@ pub fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -
 
     loop {
         // Fast: Always check for user input with low latency
-        let has_event = if let Some(ev) = poll_event(poll_timeout, app.active_modal())? {
+        if let Some(ev) = poll_event(poll_timeout, app.active_modal())? {
             needs_redraw = true; // User input always triggers redraw
             match ev {
                 AppEvent::Text(ch) => {

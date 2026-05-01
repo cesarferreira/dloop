@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::thread;
+use which::which;
 
-pub fn find_gradlew(project_root: &Path) -> Option<PathBuf> {
+pub fn find_gradle(project_root: &Path) -> Option<PathBuf> {
     let unix = project_root.join("gradlew");
     if unix.is_file() {
         return Some(unix);
@@ -15,7 +16,9 @@ pub fn find_gradlew(project_root: &Path) -> Option<PathBuf> {
     if win.is_file() {
         return Some(win);
     }
-    None
+
+    // Default to searching `gradle` executable
+    which("gradle").ok()
 }
 
 pub struct GradleSpawn {
@@ -23,13 +26,13 @@ pub struct GradleSpawn {
 }
 
 pub fn spawn_gradle(
-    gradlew: &Path,
+    gradle: &Path,
     project_root: &Path,
     tasks: &[&str],
     android_serial: Option<&str>,
     tx: Sender<String>,
 ) -> Result<GradleSpawn> {
-    let mut cmd = Command::new(gradlew);
+    let mut cmd = Command::new(gradle);
     cmd.current_dir(project_root);
     cmd.args(tasks);
     cmd.stdout(Stdio::piped());
@@ -40,7 +43,7 @@ pub fn spawn_gradle(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| anyhow!("gradlew spawn failed: {e}"))?;
+        .map_err(|e| anyhow!("gradlew/gradle spawn failed: {e}"))?;
 
     let stdout = child.stdout.take().expect("stdout");
     let stderr = child.stderr.take().expect("stderr");

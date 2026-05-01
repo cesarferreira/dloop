@@ -14,7 +14,7 @@ use ratatui::Terminal;
 use crate::action::Action;
 use crate::adb::{AdbClient, Device};
 use crate::event::{poll_event, AppEvent, Modal};
-use crate::modules::build::{find_gradlew, spawn_gradle};
+use crate::modules::build::{find_gradle, spawn_gradle};
 use crate::modules::config::{save_global_config, save_project_config, MergedConfig};
 use crate::modules::device::scan_devices;
 use crate::modules::logcat::{
@@ -1027,16 +1027,13 @@ impl App {
             self.show_toast("No device selected");
             return Ok(());
         };
-        let gradlew = match find_gradlew(&self.project_root) {
-            Some(g) => g,
-            None => {
-                self.show_toast("gradlew not found in project root");
-                return Ok(());
-            }
+        let Some(gradle) = find_gradle(&self.project_root) else {
+            self.show_toast("gradlew not found in project root / gradle not found in PATH");
+            return Ok(());
         };
         self.build_lines.clear();
         let spawn = spawn_gradle(
-            &gradlew,
+            &gradle,
             &self.project_root,
             &[task],
             Some(serial.as_str()),
@@ -1056,16 +1053,13 @@ impl App {
             self.show_toast("Already running (s to stop)");
             return Ok(());
         }
-        let gradlew = match find_gradlew(&self.project_root) {
-            Some(g) => g,
-            None => {
-                self.show_toast("gradlew not found in project root");
-                return Ok(());
-            }
+        let Some(gradle) = find_gradle(&self.project_root) else {
+            self.show_toast("gradlew not found in project root / gradle not found in PATH");
+            return Ok(());
         };
         self.build_lines.clear();
         let spawn = spawn_gradle(
-            &gradlew,
+            &gradle,
             &self.project_root,
             &["clean"],
             None,

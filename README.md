@@ -36,7 +36,7 @@ In the age of AI agents and terminal-first workflows, your editor is Cursor/Neov
 |------|----------|-------|
 | Rust 1.74+ | Build only | via [rustup](https://rustup.rs) |
 | `adb` | Yes | Android SDK Platform Tools |
-| `gradlew` | For build/install | Any standard Android project |
+| `gradlew`/`gradle` | For build/install | Any standard Android project |
 | `scrcpy` | No | For `m` screen mirror action |
 
 ## Installation

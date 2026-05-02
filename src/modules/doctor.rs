@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::adb::AdbClient;
-use crate::modules::build::find_gradlew;
+use crate::modules::build::find_gradle;
 use crate::modules::mirror::scrcpy_path;
 use crate::modules::project::{find_app_gradle, infer_project};
 
@@ -128,8 +128,8 @@ fn collect_checks(project_root: &Path) -> Vec<CheckResult> {
         },
     });
 
-    let gradlew = find_gradlew(project_root);
-    checks.push(match gradlew {
+    let gradle = find_gradle(project_root);
+    checks.push(match gradle {
         Some(ref path) => {
             let executable = is_executable(path);
             CheckResult {
@@ -138,7 +138,7 @@ fn collect_checks(project_root: &Path) -> Vec<CheckResult> {
                 } else {
                     CheckStatus::Warn
                 },
-                label: "gradlew",
+                label: "gradlew/gradle",
                 detail: if executable {
                     path.display().to_string()
                 } else {
@@ -148,7 +148,7 @@ fn collect_checks(project_root: &Path) -> Vec<CheckResult> {
         }
         None => CheckResult {
             status: CheckStatus::Fail,
-            label: "gradlew",
+            label: "gradlew/gradle",
             detail: "not found in project root".to_string(),
         },
     });
